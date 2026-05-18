@@ -395,9 +395,13 @@ def _historical_train_and_predict(tickers, D):
 
     print(f"\n  [1b] Training ensemble on {hist_X_n.shape[0]:,} samples ({hist_X_n.shape[1]} features)...")
 
+    # Log-transform volatility target for heteroscedastic NLL (Andersen et al. 2003)
+    LOG_EPSILON = 1e-4
+    hist_Y_risk_log = np.log(np.maximum(hist_Y_risk, LOG_EPSILON))
+
     X_t = torch.tensor(hist_X_n, dtype=torch.float32)
     yr_t = torch.tensor(hist_Y_ret, dtype=torch.float32)
-    yk_t = torch.tensor(hist_Y_risk, dtype=torch.float32)
+    yk_t = torch.tensor(hist_Y_risk_log, dtype=torch.float32)
 
     # Train/val split for early stopping (80/20, shared across ensemble members)
     torch.manual_seed(config.RANDOM_SEED)
@@ -416,17 +420,13 @@ def _historical_train_and_predict(tickers, D):
     delta = getattr(config, 'TRAINING_HUBER_DELTA', 0.3)
     epochs = getattr(config, 'TRAINING_EPOCHS', 800)
 
+    from models import HeteroscedasticDualHeadNN, heteroscedastic_loss
+
     models = []
     for seed in range(config.N_ENSEMBLE):
         torch.manual_seed(seed * 77)
         D_sel = hist_X_n.shape[1]
-        layers = []
-        in_dim = D_sel
-        for h in arch:
-            layers.extend([nn.Linear(in_dim, h), nn.ReLU(), nn.Dropout(0.2)])
-            in_dim = h
-        layers.append(nn.Linear(in_dim, 2))
-        model = nn.Sequential(*layers)
+        model = HeteroscedasticDualHeadNN(in_dim=D_sel, hidden_dims=arch, dropout=0.2)
         opt = torch.optim.Adam(model.parameters(), lr=lr,
                        weight_decay=getattr(config, 'TRAINING_WEIGHT_DECAY', 1e-4))
 
@@ -437,18 +437,16 @@ def _historical_train_and_predict(tickers, D):
             # Train step (dropout active)
             model.train()
             opt.zero_grad()
-            out = model(X_tr_t)
-            train_loss = F.huber_loss(out[:, 0], yr_tr_t, delta=delta) + \
-                         F.huber_loss(F.softplus(out[:, 1]), yk_tr_t, delta=delta)
+            pred = model(X_tr_t)
+            train_loss, _, _ = heteroscedastic_loss(pred, yr_tr_t, yk_tr_t)
             if torch.isnan(train_loss): break
             train_loss.backward(); opt.step()
 
             # Val step (dropout off)
             model.eval()
             with torch.no_grad():
-                val_out = model(X_val_t)
-                val_loss = F.huber_loss(val_out[:, 0], yr_val_t, delta=delta) + \
-                           F.huber_loss(F.softplus(val_out[:, 1]), yk_val_t, delta=delta)
+                pred_val = model(X_val_t)
+                val_loss, _, _ = heteroscedastic_loss(pred_val, yr_val_t, yk_val_t)
                 val_loss_item = val_loss.item()
 
             if val_loss_item < best_val:
@@ -465,7 +463,7 @@ def _historical_train_and_predict(tickers, D):
             model.load_state_dict(best_state)
 
         models.append(model)
-        print(f"    NN #{seed+1}: val_loss={best_val:.6f} at epoch {best_ep+1}, stopped at {ep+1}")
+        print(f"    NN #{seed+1}: val_NLL={best_val:.6f} at epoch {best_ep+1}, stopped at {ep+1}")
 
     # Predict on CURRENT data
     print(f"\n  [1c] Predicting on current {len(tickers)} stocks...")
@@ -503,7 +501,7 @@ def _historical_train_and_predict(tickers, D):
 
     mc = {}
     for i, tk in enumerate(tickers):
-        all_rets, all_risks = [], []
+        all_rets, all_risks_log = [], []
         for model in models:
             model.eval()
             for m in model.modules():
@@ -511,9 +509,12 @@ def _historical_train_and_predict(tickers, D):
             passes = config.MC_FORWARD_PASSES // config.N_ENSEMBLE
             for _ in range(passes):
                 with torch.no_grad():
-                    out = model(X_cur_t[i:i+1])
-                    all_rets.append(out[0, 0].item())
-                    all_risks.append(F.softplus(out[0, 1]).item())
+                    ret_mu, _, risk_log_mu, _ = model(X_cur_t[i:i+1])
+                    all_rets.append(ret_mu[0].item())
+                    all_risks_log.append(risk_log_mu[0].item())
+
+        # Back-transform log-volatility to actual scale (Andersen 2003 convention)
+        all_risks = np.exp(np.array(all_risks_log)).tolist()
 
         mc[tk] = {
             'ret_mean': np.mean(all_rets),

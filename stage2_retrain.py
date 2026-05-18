@@ -1,28 +1,23 @@
 """
 stage2_retrain.py — Stage 2 production retrain with Optuna-best config
 
-Goal:
-  Take the best Optuna Stage 1 hyperparameters (N=5, 4-fold) and validate them
-  at production scale (N=20, 5-fold) while harvesting full per-ticker prediction
-  data needed for Tasks A/B/C analysis.
+Heteroscedastic dual-head NN (v2.3.12):
+  - Output: (ret_mu, ret_logvar, risk_mu, risk_logvar)
+  - Loss:   Gaussian NLL per head (Kendall & Gal 2017)
+  - Aleatoric (NN logvar) + epistemic (ensemble variance) uncertainty
+  - Y_risk log-transformed for NLL training (Andersen et al. 2003)
 
 Differences vs optuna_search.py:
-  - N_ENSEMBLE = 20 (production scale, not 5)
-  - 5 folds (not 4) — Fold 1 included
-  - SNDK excluded from training+evaluation (post-IPO artifact, v2.3.3 finding)
-  - Real-time matplotlib loss plot during training
-  - Saves full per-ticker prediction matrix (Task A)
-  - Computes SPY benchmark for ALL folds (Task B)
-  - Aggregates per-snapshot rankings (Task C)
-
-Configuration:
-  Default = Top 1 from results/optuna_stage1_results.json (Trial #58)
-  Override via --config-rank {1,2,3} to retrain Top 2 or Top 3.
+  - N_ENSEMBLE = 20 (production scale)
+  - 5 folds (Fold 1 included)
+  - SNDK excluded by default
+  - Real-time matplotlib loss plot
+  - Saves full per-ticker prediction matrix incl. risk + uncertainty
+  - Computes SPY benchmark for ALL folds
+  - Aggregates per-snapshot rankings
 
 Usage:
   caffeinate -i python -u stage2_retrain.py 2>&1 | tee stage2_top1.log
-
-Estimated runtime: ~7 hours (Top 1, medium arch)
 """
 
 import os
@@ -38,44 +33,31 @@ import torch.optim as optim
 
 sys.path.insert(0, '.')
 
+from models import HeteroscedasticDualHeadNN, heteroscedastic_loss
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
 SEED = 42
-N_ENSEMBLE_STAGE2 = 20         # Production scale (was 5 in Stage 1)
-FOLDS_STAGE2 = [0, 1, 2, 3, 4] # All 5 folds (Stage 1 used [1,2,3,4])
-EXCLUDED_TICKERS = {'SNDK'}    # v2.3.3 SNDK post-IPO artifact (Section 33.4)
+N_ENSEMBLE_STAGE2 = 20
+FOLDS_STAGE2 = [0, 1, 2, 3, 4]
+EXCLUDED_TICKERS = {'SNDK'}
 N_SELECT = 5
 RESULTS_DIR = Path('results/stage2')
-PER_SNAPSHOT_BUCKET = 'M'      # Monthly buckets for Task C
+PER_SNAPSHOT_BUCKET = 'M'
 
-# Plot settings
-PLOT_UPDATE_EVERY = 50          # Update plot every N epochs
-PLOT_BACKEND = 'MacOSX'         # Mac native; 'TkAgg' fallback if needed
+# Log-transform clamp for volatility target (Andersen et al. 2003, Econometrica).
+# log(max(Y_risk, LOG_EPSILON)) handles 22 zero-volatility samples in cache.
+LOG_EPSILON = 1e-4
+
+PLOT_UPDATE_EVERY = 50
+PLOT_BACKEND = 'MacOSX'
 
 
 # ============================================================
-# REAL-TIME LOSS PLOT (SPM12-style live graph window)
+# REAL-TIME LOSS PLOT
 # ============================================================
 class LiveLossPlot:
-    """
-    matplotlib figure with N subplots (one per ensemble member).
-    Each subplot shows train_loss + val_loss curves growing live.
-    Best epoch marked with star, stop epoch marked with vertical line.
-
-    Usage:
-        plot = LiveLossPlot(n_models=20, fold_id=2, config_label="...")
-        plot.start_model(0)                  # at NN #1 start
-        plot.update(0, epoch, train, val)    # called periodically inside training loop
-        plot.mark_best(0, best_epoch, best_val)
-        plot.mark_stop(0, stop_epoch)
-        plot.next_fold(fold_id=3, ...)       # at end of fold
-
-    Design:
-        - 20 NN -> 4 rows x 5 cols subplots, sized 18x10 inches
-        - Plot lines updated in-place (not redrawn) for speed
-        - draw_idle() + flush_events() to keep UI responsive without blocking training
-    """
     def __init__(self, n_models, fold_id, config_label):
         import matplotlib
         try:
@@ -83,14 +65,13 @@ class LiveLossPlot:
         except Exception:
             matplotlib.use('TkAgg')
         import matplotlib.pyplot as plt
-        plt.ion()  # interactive mode
+        plt.ion()
 
         self.plt = plt
         self.n_models = n_models
         self.fold_id = fold_id
         self.config_label = config_label
 
-        # Layout: 4 rows × 5 cols for 20 models, or auto for other counts
         ncols = 5 if n_models >= 5 else n_models
         nrows = (n_models + ncols - 1) // ncols
         self.fig, axes = plt.subplots(nrows, ncols, figsize=(18, 3 * nrows + 1))
@@ -100,7 +81,7 @@ class LiveLossPlot:
             if i < n_models:
                 ax.set_title(f'NN #{i+1}', fontsize=10)
                 ax.set_xlabel('Epoch', fontsize=8)
-                ax.set_ylabel('Loss', fontsize=8)
+                ax.set_ylabel('NLL', fontsize=8)
                 ax.grid(True, alpha=0.3)
                 ax.tick_params(labelsize=7)
             else:
@@ -109,7 +90,6 @@ class LiveLossPlot:
         self._set_super_title()
         self.fig.tight_layout(rect=[0, 0, 1, 0.95])
 
-        # State per model
         self.lines_train = [None] * n_models
         self.lines_val = [None] * n_models
         self.best_markers = [None] * n_models
@@ -125,12 +105,11 @@ class LiveLossPlot:
         )
 
     def start_model(self, model_idx):
-        """Initialize lines for a new model (first epoch of NN #model_idx+1)."""
         ax = self.axes[model_idx]
         ax.cla()
         ax.set_title(f'NN #{model_idx+1}', fontsize=10)
         ax.set_xlabel('Epoch', fontsize=8)
-        ax.set_ylabel('Loss', fontsize=8)
+        ax.set_ylabel('NLL', fontsize=8)
         ax.grid(True, alpha=0.3)
         ax.tick_params(labelsize=7)
 
@@ -147,13 +126,12 @@ class LiveLossPlot:
         self._draw()
 
     def update(self, model_idx, epoch, train_loss, val_loss):
-        """Append datapoint and refresh subplot."""
         self.epochs_data[model_idx].append(epoch)
         self.train_data[model_idx].append(train_loss)
         self.val_data[model_idx].append(val_loss)
 
         if epoch % PLOT_UPDATE_EVERY != 0:
-            return  # batch updates
+            return
 
         line_t = self.lines_train[model_idx]
         line_v = self.lines_val[model_idx]
@@ -169,7 +147,6 @@ class LiveLossPlot:
         self._draw()
 
     def mark_best(self, model_idx, best_epoch, best_val):
-        """Add red star at best val_loss epoch."""
         ax = self.axes[model_idx]
         if self.best_markers[model_idx] is not None:
             self.best_markers[model_idx].remove()
@@ -179,17 +156,14 @@ class LiveLossPlot:
         self._draw()
 
     def mark_stop(self, model_idx, stop_epoch):
-        """Add vertical line at early-stop trigger epoch."""
         ax = self.axes[model_idx]
         if self.stop_lines[model_idx] is not None:
             self.stop_lines[model_idx].remove()
-        ymin, ymax = ax.get_ylim()
         line = ax.axvline(stop_epoch, color='gray', ls=':', lw=1, alpha=0.7)
         self.stop_lines[model_idx] = line
         self._draw()
 
     def next_fold(self, fold_id, config_label):
-        """Reset for new fold."""
         self.fold_id = fold_id
         self.config_label = config_label
         for i in range(self.n_models):
@@ -198,7 +172,6 @@ class LiveLossPlot:
         self._draw()
 
     def save_snapshot(self, path):
-        """Save current state as PNG."""
         self.fig.savefig(path, dpi=80, bbox_inches='tight')
 
     def _draw(self):
@@ -206,7 +179,7 @@ class LiveLossPlot:
             self.fig.canvas.draw_idle()
             self.fig.canvas.flush_events()
         except Exception:
-            pass  # plot failure should never crash training
+            pass
 
     def close(self):
         try:
@@ -215,34 +188,25 @@ class LiveLossPlot:
             pass
 
 
-# Global plot instance (used by patched training step)
-_LIVE_PLOT = None
-_CURRENT_NN_IDX = 0
-
-
 # ============================================================
-# CACHE LOADING + SNDK EXCLUSION
+# CACHE LOADING
 # ============================================================
 def load_filtered_cache(cache_path='results/backtest_cache.npz'):
-    """Load cache and filter out EXCLUDED_TICKERS."""
     if not os.path.exists(cache_path):
         raise FileNotFoundError(
-            f"Cache not found at {cache_path}. "
-            f"Run a backtest first to generate it."
+            f"Cache not found at {cache_path}. Run a backtest first."
         )
     print(f"[Data] Loading {cache_path}...")
     data = np.load(cache_path, allow_pickle=True)
     X = data['X']
     Y_ret = data['Y_ret']
     Y_risk = data['Y_risk']
-    meta = data['meta']  # ndarray (N, 3): [ticker, snapshot_offset, date_str]
+    meta = data['meta']
     feat_names = data['feat_names']
 
-    # Sanity: confirm shape (N, 3) — if format ever changes this raises early
     if meta.ndim != 2 or meta.shape[1] < 3:
         raise ValueError(
-            f"Unexpected meta shape {meta.shape}; expected (N, 3) "
-            f"with [ticker, offset, date]"
+            f"Unexpected meta shape {meta.shape}; expected (N, 3)"
         )
 
     sample_tickers = meta[:, 0].astype(str)
@@ -262,10 +226,6 @@ def load_filtered_cache(cache_path='results/backtest_cache.npz'):
         print(f"[Data] Excluded {n_excluded} samples from "
               f"{sorted(EXCLUDED_TICKERS)} (was {n_total}, now {len(X)})")
 
-    # [v2.3.7 fix] Convert to Python list for downstream membership tests.
-    # backtest.py's _stratified_kfold may return ticker lists with different
-    # numpy dtype (e.g., <U5 vs <U10), causing np.isin to silently return
-    # empty masks. Plain Python str comparison via set is dtype-agnostic.
     sample_tickers = [str(t) for t in sample_tickers]
     sample_dates = [str(d) for d in sample_dates]
 
@@ -277,16 +237,15 @@ def load_filtered_cache(cache_path='results/backtest_cache.npz'):
         'X': X, 'Y_ret': Y_ret, 'Y_risk': Y_risk,
         'sample_tickers': sample_tickers,
         'sample_dates': sample_dates,
-        'meta': meta,  # original ndarray, kept for backtest.py compatibility
+        'meta': meta,
         'feat_names': feat_names,
     }
 
 
 # ============================================================
-# CONFIG OVERRIDE (same pattern as optuna_search.py)
+# CONFIG OVERRIDE
 # ============================================================
 def override_config(config, overrides):
-    """Set config attributes; return originals dict for restoration."""
     originals = {}
     for k, v in overrides.items():
         originals[k] = getattr(config, k, None)
@@ -304,16 +263,13 @@ def restore_config(config, originals):
 
 
 # ============================================================
-# ADAM PATCH (forces weight_decay from trial)
+# ADAM PATCH
 # ============================================================
 def patch_adam(weight_decay_override):
-    """Monkey-patch torch.optim.Adam to force weight_decay value.
-    Returns the original __init__ for restoration."""
     original = optim.Adam.__init__
 
     def patched(self, params, lr=0.001, betas=(0.9, 0.999),
                 eps=1e-8, weight_decay=None, amsgrad=False, **kw):
-        # Override only when caller passes default 1e-4 (backtest.py hardcodes this)
         if weight_decay is None or abs(weight_decay - 1e-4) < 1e-12:
             weight_decay = weight_decay_override
         return original(self, params, lr=lr, betas=betas, eps=eps,
@@ -324,81 +280,35 @@ def patch_adam(weight_decay_override):
 
 
 # ============================================================
-# TRAINING HOOK (intercepts loss values for live plot)
-# ============================================================
-# We monkey-patch the training-loop print statements in backtest.py is complex.
-# Cleaner approach: patch torch.nn.Module.eval / Module.train cycles is brittle.
-# Best approach: patch the function that prints "NN #X: val_loss=..." line.
-# Looking at the optuna_search log format, training is inside _run_single_fold.
-# We use a different mechanism: monkey-patch print() during fold execution to
-# also pipe loss values to the plot.
-
-class TrainingPrintInterceptor:
-    """Wraps print() to extract train/val loss from backtest.py training output.
-
-    backtest.py prints lines like:
-      "NN #1: val_loss=0.011209 at epoch 1192, stopped at 1233"
-
-    To get per-epoch progress we need backtest.py to also print epoch progress.
-    This requires a small patch to backtest.py training loop, OR we inject
-    a monitor via a different mechanism.
-
-    Compromise: parse just the summary line (final NN # results) and skip the
-    real-time intra-epoch curve. To get true real-time plot, backtest.py must
-    be patched to print epoch progress, OR we reimplement the training loop
-    inside this script.
-
-    Implementation: REIMPLEMENT the per-fold training here (parallel to
-    backtest.py _run_single_fold) to gain plot hooks. We still call backtest.py
-    helpers for data prep / sector splits / metrics, but the training loop
-    itself is local for plot integration.
-    """
-    pass  # superseded by direct reimplementation below
-
-
-# ============================================================
-# LOCAL FOLD RUNNER (with live plot hooks)
+# FOLD RUNNER
 # ============================================================
 def run_fold_with_plot(data, train_tickers, test_tickers, fold_id,
                        config_module, live_plot, n_ensemble, n_select,
                        config_label):
     """
-    Runs one fold of training with live plot updates.
+    One fold of heteroscedastic ensemble training + per-ticker aggregation.
 
-    This is a PARALLEL implementation to backtest.py _run_single_fold(),
-    enriched with:
-      - Live plot hooks (start/update/mark_best/mark_stop per NN)
-      - Per-ticker prediction matrix collection (Task A)
-      - SPY benchmark computation (Task B helper data)
-
-    Returns dict with:
-      - rank_corr, selection_alpha, top5, etc. (same as backtest.py)
-      - full_predictions: dict[ticker] -> (mean_pred, std_pred, mean_actual, snapshots)
-      - per_snapshot: list of (snap_date, ticker, pred, actual)
+    Returns dict with rank_corr, selection_alpha, full_ranking incl. risk/sigma,
+    per_snapshot rankings, etc.
     """
     from scipy.stats import spearmanr
 
     X = data['X']
     Y_ret = data['Y_ret']
     Y_risk = data['Y_risk']
-    sample_tickers = data['sample_tickers']  # Python list
-    sample_dates = data['sample_dates']      # Python list
-    feat_names = data['feat_names']
+    sample_tickers = data['sample_tickers']
+    sample_dates = data['sample_dates']
 
-    # [v2.3.7 fix] Use set-based membership instead of np.isin to avoid
-    # numpy dtype mismatch issues (e.g., <U5 vs <U10 returning empty mask).
     train_set = set(str(t) for t in train_tickers)
     test_set = set(str(t) for t in test_tickers)
     train_mask = np.array([t in train_set for t in sample_tickers], dtype=bool)
     test_mask = np.array([t in test_set for t in sample_tickers], dtype=bool)
 
-    # Sanity assertion: empty masks indicate ticker matching failed
     if train_mask.sum() == 0:
         raise RuntimeError(
             f"Empty train set for fold {fold_id}. "
             f"sample_tickers[:3]={sample_tickers[:3]}, "
-            f"train_tickers[:3]={list(train_tickers)[:3]}. "
-            f"Likely dtype mismatch in ticker comparison."
+            f"train_tickers[:3]={list(train_tickers)[:3]}."
         )
     if test_mask.sum() == 0:
         raise RuntimeError(
@@ -411,6 +321,12 @@ def run_fold_with_plot(data, train_tickers, test_tickers, fold_id,
     Y_risk_tr_full = Y_risk[train_mask]
     X_te = X[test_mask]
     Y_ret_te = Y_ret[test_mask]
+    Y_risk_te = Y_risk[test_mask]
+
+    # Log-transform volatility for heteroscedastic NLL (Andersen et al. 2003).
+    # Training in log-space; inference back-transforms via exp() for display.
+    Y_risk_tr_full_log = np.log(np.maximum(Y_risk_tr_full, LOG_EPSILON))
+
     test_sample_tickers = np.array([sample_tickers[i]
                                     for i in range(len(sample_tickers))
                                     if test_mask[i]])
@@ -451,29 +367,30 @@ def run_fold_with_plot(data, train_tickers, test_tickers, fold_id,
     fit_idx = perm[n_val:]
     X_fit = X_tr_full[fit_idx]
     Yr_fit = Y_ret_tr_full[fit_idx]
-    Yk_fit = Y_risk_tr_full[fit_idx]
+    Yk_fit_log = Y_risk_tr_full_log[fit_idx]
     X_val = X_tr_full[val_idx]
     Yr_val = Y_ret_tr_full[val_idx]
-    Yk_val = Y_risk_tr_full[val_idx]
+    Yk_val_log = Y_risk_tr_full_log[val_idx]
 
     print(f"    Train fit: {len(X_fit):,}, val: {len(X_val):,}, "
           f"test: {len(X_te):,}")
 
-    # Hyperparameters from config
     arch = getattr(config_module, 'TRAINING_NN_ARCHITECTURE', [64, 32, 16])
     if isinstance(arch, str):
         arch_map = {'small': [32, 16], 'medium': [64, 32, 16],
                     'large': [128, 64, 32]}
         arch = arch_map.get(arch, [64, 32, 16])
     lr = getattr(config_module, 'TRAINING_LR', 5e-4)
-    huber_delta = getattr(config_module, 'TRAINING_HUBER_DELTA', 0.3)
     weight_decay = getattr(config_module, 'TRAINING_WEIGHT_DECAY', 1e-4)
     epochs = getattr(config_module, 'TRAINING_EPOCHS', 5000)
     patience = getattr(config_module, 'EARLY_STOP_PATIENCE', 41)
     batch_size = 256
 
-    # Build ensemble
-    ensemble_predictions = []  # list of (n_test,) arrays per model
+    # Ensemble: collect 4-tuple predictions per model (risk in log-space)
+    ens_ret_mu = []
+    ens_ret_sigma = []
+    ens_risk_log_mu = []
+    ens_risk_log_sigma = []
 
     for nn_idx in range(n_ensemble):
         torch.manual_seed(SEED + fold_id * 100 + nn_idx)
@@ -482,27 +399,16 @@ def run_fold_with_plot(data, train_tickers, test_tickers, fold_id,
         if live_plot is not None:
             live_plot.start_model(nn_idx)
 
-        # Build network
-        layers = []
-        prev = n_features
-        for h in arch:
-            layers.append(torch.nn.Linear(prev, h))
-            layers.append(torch.nn.ReLU())
-            layers.append(torch.nn.Dropout(0.2))
-            prev = h
-        layers.append(torch.nn.Linear(prev, 2))  # ret + risk
-        model = torch.nn.Sequential(*layers)
+        model = HeteroscedasticDualHeadNN(in_dim=n_features, hidden_dims=arch, dropout=0.2)
 
-        loss_fn = torch.nn.HuberLoss(delta=huber_delta)
-        optimizer = optim.Adam(model.parameters(), lr=lr,
-                               weight_decay=weight_decay)
+        optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
         X_fit_t = torch.tensor(X_fit, dtype=torch.float32)
         Yr_fit_t = torch.tensor(Yr_fit, dtype=torch.float32)
-        Yk_fit_t = torch.tensor(Yk_fit, dtype=torch.float32)
+        Yk_fit_t = torch.tensor(Yk_fit_log, dtype=torch.float32)
         X_val_t = torch.tensor(X_val, dtype=torch.float32)
         Yr_val_t = torch.tensor(Yr_val, dtype=torch.float32)
-        Yk_val_t = torch.tensor(Yk_val, dtype=torch.float32)
+        Yk_val_t = torch.tensor(Yk_val_log, dtype=torch.float32)
         X_te_t = torch.tensor(X_te, dtype=torch.float32)
 
         best_val = float('inf')
@@ -512,7 +418,6 @@ def run_fold_with_plot(data, train_tickers, test_tickers, fold_id,
 
         for epoch in range(epochs):
             model.train()
-            # Mini-batch
             order = torch.randperm(len(X_fit_t))
             losses = []
             for i in range(0, len(order), batch_size):
@@ -521,7 +426,7 @@ def run_fold_with_plot(data, train_tickers, test_tickers, fold_id,
                 yr = Yr_fit_t[bi]
                 yk = Yk_fit_t[bi]
                 pred = model(xb)
-                loss = loss_fn(pred[:, 0], yr) + loss_fn(pred[:, 1], yk)
+                loss, _, _ = heteroscedastic_loss(pred, yr, yk)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
@@ -531,8 +436,8 @@ def run_fold_with_plot(data, train_tickers, test_tickers, fold_id,
             model.eval()
             with torch.no_grad():
                 pred_val = model(X_val_t)
-                val_loss = (loss_fn(pred_val[:, 0], Yr_val_t) +
-                            loss_fn(pred_val[:, 1], Yk_val_t)).item()
+                vl, _, _ = heteroscedastic_loss(pred_val, Yr_val_t, Yk_val_t)
+            val_loss = vl.item()
 
             if live_plot is not None:
                 live_plot.update(nn_idx, epoch, train_loss, val_loss)
@@ -552,33 +457,64 @@ def run_fold_with_plot(data, train_tickers, test_tickers, fold_id,
             live_plot.mark_best(nn_idx, best_epoch, best_val)
             live_plot.mark_stop(nn_idx, stop_epoch)
 
-        # Load best, predict on test
         model.load_state_dict(best_state)
         model.eval()
         with torch.no_grad():
-            pred_te = model(X_te_t).numpy()
-        ensemble_predictions.append(pred_te[:, 0])  # return predictions
+            ret_mu, ret_lv, risk_log_mu, risk_log_lv = model(X_te_t)
+        ens_ret_mu.append(ret_mu.numpy())
+        ens_ret_sigma.append(torch.exp(0.5 * ret_lv).numpy())
+        ens_risk_log_mu.append(risk_log_mu.numpy())
+        ens_risk_log_sigma.append(torch.exp(0.5 * risk_log_lv).numpy())
 
-        print(f"    NN #{nn_idx+1}: val_loss={best_val:.6f} at epoch {best_epoch}, "
+        print(f"    NN #{nn_idx+1}: val_NLL={best_val:.6f} at epoch {best_epoch}, "
               f"stopped at {stop_epoch}")
 
-    # Aggregate ensemble
-    pred_matrix = np.stack(ensemble_predictions)  # (N_ens, n_test)
-    mean_pred = pred_matrix.mean(axis=0)
-    std_pred = pred_matrix.std(axis=0)
+    # Stack ensemble outputs (risk stays in log-space)
+    ret_mu_stack = np.stack(ens_ret_mu)                  # (N_ens, n_test)
+    ret_sigma_stack = np.stack(ens_ret_sigma)
+    risk_log_mu_stack = np.stack(ens_risk_log_mu)
+    risk_log_sigma_stack = np.stack(ens_risk_log_sigma)
+
+    # Return predictions (linear space, unchanged)
+    mean_pred = ret_mu_stack.mean(axis=0)
+    ret_total_sigma = np.sqrt(ret_mu_stack.var(axis=0) + (ret_sigma_stack ** 2).mean(axis=0))
+    ret_aleatoric_sigma = (ret_sigma_stack ** 2).mean(axis=0) ** 0.5
+
+    # Risk in log-space — used for NLL eval, calibration plots (Andersen 2003)
+    risk_log_mean = risk_log_mu_stack.mean(axis=0)
+    risk_log_total_sigma = np.sqrt(
+        risk_log_mu_stack.var(axis=0) + (risk_log_sigma_stack ** 2).mean(axis=0)
+    )
+    risk_log_aleatoric_sigma = (risk_log_sigma_stack ** 2).mean(axis=0) ** 0.5
+
+    # Risk back-transformed to actual volatility scale for display + MAE.
+    # exp(mu) gives the median of the lognormal; Andersen uses this convention.
+    risk_mean_pred = np.exp(risk_log_mean)
 
     # Per-ticker aggregation
     unique_tickers = np.unique(test_sample_tickers)
     ticker_pred_mean = {}
     ticker_pred_std = {}
+    ticker_ret_aleatoric = {}
+    ticker_risk_mean = {}            # actual volatility scale
+    ticker_risk_log_mean = {}        # log-space (for calibration)
+    ticker_risk_log_sigma = {}       # log-space total uncertainty
+    ticker_risk_log_aleatoric = {}   # log-space aleatoric only
     ticker_actual_mean = {}
+    ticker_actual_risk = {}
     ticker_n_snapshots = {}
 
     for tk in unique_tickers:
         m = test_sample_tickers == tk
         ticker_pred_mean[tk] = float(mean_pred[m].mean())
-        ticker_pred_std[tk] = float(std_pred[m].mean())
+        ticker_pred_std[tk] = float(ret_total_sigma[m].mean())
+        ticker_ret_aleatoric[tk] = float(ret_aleatoric_sigma[m].mean())
+        ticker_risk_mean[tk] = float(risk_mean_pred[m].mean())
+        ticker_risk_log_mean[tk] = float(risk_log_mean[m].mean())
+        ticker_risk_log_sigma[tk] = float(risk_log_total_sigma[m].mean())
+        ticker_risk_log_aleatoric[tk] = float(risk_log_aleatoric_sigma[m].mean())
         ticker_actual_mean[tk] = float(Y_ret_te[m].mean())
+        ticker_actual_risk[tk] = float(Y_risk_te[m].mean())
         ticker_n_snapshots[tk] = int(m.sum())
 
     # Rank correlation
@@ -598,7 +534,7 @@ def run_fold_with_plot(data, train_tickers, test_tickers, fold_id,
     selection_alpha = float(top5_actual - all_mean)
     long_short = float(top5_actual - bot5_actual)
 
-    # Build full ranking DataFrame data (Task A)
+    # Full ranking (Task A) — risk in both linear and log space
     actual_rank_order = np.argsort(-actual_arr)
     actual_rank_map = {tk_list[i]: r for r, i in enumerate(actual_rank_order)}
     pred_rank_map = {tk_list[i]: r for r, i in enumerate(pred_rank)}
@@ -609,7 +545,13 @@ def run_fold_with_plot(data, train_tickers, test_tickers, fold_id,
             'ticker': tk,
             'pred_ret': ticker_pred_mean[tk],
             'pred_std': ticker_pred_std[tk],
+            'pred_aleatoric': ticker_ret_aleatoric[tk],
+            'pred_risk': ticker_risk_mean[tk],                       # actual volatility scale
+            'pred_risk_log_mean': ticker_risk_log_mean[tk],          # log-space (for calibration)
+            'pred_risk_log_sigma': ticker_risk_log_sigma[tk],        # log-space total uncertainty
+            'pred_risk_log_aleatoric': ticker_risk_log_aleatoric[tk],
             'actual_ret': ticker_actual_mean[tk],
+            'actual_risk': ticker_actual_risk[tk],
             'pred_rank': pred_rank_map[tk] + 1,
             'actual_rank': actual_rank_map[tk] + 1,
             'rank_error': abs(pred_rank_map[tk] - actual_rank_map[tk]),
@@ -625,6 +567,7 @@ def run_fold_with_plot(data, train_tickers, test_tickers, fold_id,
         for bucket in np.unique(buckets):
             bucket_mask = buckets == bucket
             bucket_preds = mean_pred[bucket_mask]
+            bucket_pred_sigmas = ret_total_sigma[bucket_mask]
             bucket_actuals = Y_ret_te[bucket_mask]
             bucket_tks = test_sample_tickers[bucket_mask]
             order = np.argsort(-bucket_preds)
@@ -633,6 +576,7 @@ def run_fold_with_plot(data, train_tickers, test_tickers, fold_id,
                     'bucket': bucket,
                     'ticker': bucket_tks[idx],
                     'pred_ret': float(bucket_preds[idx]),
+                    'pred_sigma': float(bucket_pred_sigmas[idx]),
                     'actual_ret': float(bucket_actuals[idx]),
                     'rank_in_bucket': rank + 1,
                     'n_in_bucket': len(order),
@@ -662,10 +606,9 @@ def run_fold_with_plot(data, train_tickers, test_tickers, fold_id,
 
 
 # ============================================================
-# SPY BENCHMARK (Task B)
+# SPY BENCHMARK
 # ============================================================
 def fetch_spy_benchmark(date_ranges):
-    """For each fold's test date range, fetch SPY 3-month forward return."""
     try:
         import yfinance as yf
         import pandas as pd
@@ -692,11 +635,9 @@ def fetch_spy_benchmark(date_ranges):
             results.append(None)
             continue
         d_start, d_end = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
-        # Estimate SPY 3-month forward return averaged over the fold's date span
         returns = []
         for d in pd.date_range(d_start, d_end, freq='W'):
             try:
-                # nearest trading day
                 p_start_idx = spy.index.searchsorted(d)
                 if p_start_idx >= len(spy) - 63:
                     continue
@@ -721,7 +662,6 @@ def fetch_spy_benchmark(date_ranges):
 # OUTPUT WRITERS
 # ============================================================
 def save_outputs(config_label, fold_results, spy_data, total_elapsed):
-    """Write all Task A/B/C outputs."""
     out_dir = RESULTS_DIR / config_label
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -731,7 +671,6 @@ def save_outputs(config_label, fold_results, spy_data, total_elapsed):
         print("[Output] pandas not available, writing JSON only")
         pd = None
 
-    # Task A: full ranking per fold
     for fr in fold_results:
         fold_dir = out_dir / f'fold_{fr["fold_id"]+1}'
         fold_dir.mkdir(exist_ok=True)
@@ -743,12 +682,10 @@ def save_outputs(config_label, fold_results, spy_data, total_elapsed):
             with open(fold_dir / 'full_ranking.json', 'w') as f:
                 json.dump(rows, f, indent=2)
 
-        # Task C: per-snapshot
         ps = fr.get('per_snapshot') or []
         if ps and pd is not None:
             pd.DataFrame(ps).to_csv(fold_dir / 'per_snapshot_ranking.csv', index=False)
 
-    # Task B: SPY benchmark across folds
     spy_summary = []
     for fr, spy in zip(fold_results, spy_data):
         spy_summary.append({
@@ -768,7 +705,6 @@ def save_outputs(config_label, fold_results, spy_data, total_elapsed):
         with open(out_dir / 'spy_benchmark.json', 'w') as f:
             json.dump(spy_summary, f, indent=2)
 
-    # Aggregate summary
     summary = {
         'config_label': config_label,
         'n_ensemble': N_ENSEMBLE_STAGE2,
@@ -802,7 +738,7 @@ def save_outputs(config_label, fold_results, spy_data, total_elapsed):
     with open(out_dir / 'summary.json', 'w') as f:
         json.dump(summary, f, indent=2)
 
-    print(f"\n[Output] All Task A/B/C results written to {out_dir}/")
+    print(f"\n[Output] All results written to {out_dir}/")
     return summary
 
 
@@ -811,28 +747,22 @@ def save_outputs(config_label, fold_results, spy_data, total_elapsed):
 # ============================================================
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config-rank', type=int, default=1, choices=[1, 2, 3],
-                        help='Which Optuna top-N config to retrain (1=best)')
-    parser.add_argument('--no-plot', action='store_true',
-                        help='Disable real-time plot (for headless runs)')
+    parser.add_argument('--config-rank', type=int, default=1, choices=[1, 2, 3])
+    parser.add_argument('--no-plot', action='store_true')
     parser.add_argument('--results-json',
                         default='results/optuna_stage1_results.json')
-    parser.add_argument('--include-sndk', action='store_true',
-                        help='Sensitivity analysis: include SNDK in training/test '
-                             '(default: exclude, see Section 47 of v2.3.6 instruction)')
+    parser.add_argument('--include-sndk', action='store_true')
     args = parser.parse_args()
 
     np.random.seed(SEED)
     torch.manual_seed(SEED)
 
-    # [v2.3.7] CLI override: SNDK inclusion mode
     global EXCLUDED_TICKERS, RESULTS_DIR
     if args.include_sndk:
         EXCLUDED_TICKERS = set()
         RESULTS_DIR = Path('results/stage2_with_sndk')
         print("[Sensitivity mode] SNDK included; output -> results/stage2_with_sndk/")
 
-    # Load Optuna best
     with open(args.results_json) as f:
         optuna_results = json.load(f)
 
@@ -857,9 +787,10 @@ def main():
     print(f"  Folds       = {[f+1 for f in FOLDS_STAGE2]}")
     print(f"  Excluded    = {sorted(EXCLUDED_TICKERS)}")
     print(f"  Live plot   = {'OFF' if args.no_plot else 'ON'}")
+    print(f"  Loss        = Gaussian NLL (heteroscedastic, Kendall & Gal 2017)")
+    print(f"  Risk target = log-space (Andersen et al. 2003)")
     print("=" * 70)
 
-    # Setup
     import config as config_module
 
     config_overrides = {
@@ -875,27 +806,23 @@ def main():
     original_adam = patch_adam(params['weight_decay'])
 
     try:
-        # Load data
         data = load_filtered_cache()
 
-        # Build folds
         from backtest import _stratified_kfold, _get_ticker_sectors
         unique_tks = sorted(set(data['sample_tickers']))
         ticker_sectors = _get_ticker_sectors(unique_tks, verbose=False)
         folds = _stratified_kfold(unique_tks, ticker_sectors, n_folds=5)
 
-        # Setup live plot
         live_plot = None
         if not args.no_plot:
             param_str = (f"lr={params['lr']:.4f} arch={params['architecture']} "
-                         f"huber={params['huber_delta']} N={N_ENSEMBLE_STAGE2}")
+                         f"N={N_ENSEMBLE_STAGE2}")
             live_plot = LiveLossPlot(
                 n_models=N_ENSEMBLE_STAGE2,
                 fold_id=FOLDS_STAGE2[0],
                 config_label=param_str,
             )
 
-        # Run folds
         t_overall = time.time()
         fold_results = []
         for fi, fold_idx in enumerate(FOLDS_STAGE2):
@@ -907,7 +834,7 @@ def main():
             t_fold = time.time()
             if live_plot is not None and fi > 0:
                 param_str = (f"lr={params['lr']:.4f} arch={params['architecture']} "
-                             f"huber={params['huber_delta']} N={N_ENSEMBLE_STAGE2}")
+                             f"N={N_ENSEMBLE_STAGE2}")
                 live_plot.next_fold(fold_idx, param_str)
 
             result = run_fold_with_plot(
@@ -923,7 +850,6 @@ def main():
                   f"alpha={result['selection_alpha']*100:+.1f}%p, "
                   f"top5={result['top5_tickers']}, elapsed={elapsed:.1f}min")
 
-            # Save plot snapshot per fold
             if live_plot is not None:
                 snapshot_path = RESULTS_DIR / config_label / f"loss_curves_fold{fold_idx+1}.png"
                 snapshot_path.parent.mkdir(parents=True, exist_ok=True)
@@ -931,15 +857,12 @@ def main():
 
         total_elapsed = time.time() - t_overall
 
-        # Task B: SPY benchmark
         print(f"\n[Task B] Computing SPY benchmarks...")
         date_ranges = [fr['test_date_range'] for fr in fold_results]
         spy_data = fetch_spy_benchmark(date_ranges)
 
-        # Save outputs
         summary = save_outputs(config_label, fold_results, spy_data, total_elapsed)
 
-        # Final summary
         print("\n" + "=" * 70)
         print(f"STAGE 2 COMPLETE — {config_label}")
         print("=" * 70)
@@ -952,9 +875,10 @@ def main():
         print(f"\nComparison points:")
         print(f"  Optuna Stage 1 (N=5, 4-fold):  "
               f"{chosen['mean_rank_corr']:+.4f}")
-        print(f"  v2.3.4 baseline (N=20, 5-fold): +0.5311 (with SNDK)")
-        print(f"  Stage 2     (N=20, 5-fold):     "
-              f"{agg['rank_corr_mean']:+.4f} (no SNDK)")
+        print(f"  v2.3.4 baseline (N=20, 5-fold): +0.5311 (with SNDK, Huber)")
+        print(f"  v2.3.8 baseline (N=20, 5-fold): +0.5181 (no SNDK, Huber)")
+        print(f"  Stage 2 NLL (N=20, 5-fold):     "
+              f"{agg['rank_corr_mean']:+.4f} (no SNDK, Gaussian NLL log-vol)")
         print(f"\nTotal elapsed: {total_elapsed/60:.1f} min "
               f"({total_elapsed/3600:.1f} h)")
 

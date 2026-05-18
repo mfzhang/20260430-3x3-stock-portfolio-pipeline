@@ -389,41 +389,50 @@ def train_and_evaluate(X, Y_ret, Y_risk, splits):
 
 
 def _train_fold_torch(X_tr, Y_ret_tr, Y_risk_tr, X_te, Y_ret_te, Y_risk_te):
+    """
+    Walk-Forward CV diagnostic with heteroscedastic dual-head NN.
+
+    Uses the same architecture as stage2_retrain.py / backtest.py production
+    (v2.3.12) for methodological consistency. Y_risk is log-transformed per
+    Andersen et al. (2003) financial volatility convention; MAE is computed
+    in the original linear scale.
+
+    Returns (return_MAE, volatility_MAE) on test set.
+    """
     import torch
-    import torch.nn as nn
-    import torch.nn.functional as F
     import config
+    from models import HeteroscedasticDualHeadNN, heteroscedastic_loss
+
+    LOG_EPSILON = 1e-4
 
     D = X_tr.shape[1]
-    X = torch.tensor(X_tr, dtype=torch.float32)
-    yr = torch.tensor(Y_ret_tr, dtype=torch.float32)
-    yk = torch.tensor(Y_risk_tr, dtype=torch.float32)
 
     arch = getattr(config, 'TRAINING_NN_ARCHITECTURE', [64, 32, 16])
-    layers = []
-    in_dim = D
-    for h in arch:
-        layers.extend([nn.Linear(in_dim, h), nn.ReLU(), nn.Dropout(0.2)])
-        in_dim = h
-    layers.append(nn.Linear(in_dim, 2))
-    model = nn.Sequential(*layers)
+    if isinstance(arch, str):
+        arch_map = {'small': [32, 16], 'medium': [64, 32, 16],
+                    'large': [128, 64, 32]}
+        arch = arch_map.get(arch, [64, 32, 16])
 
     lr = getattr(config, 'TRAINING_LR', 0.0005)
-    delta = getattr(config, 'TRAINING_HUBER_DELTA', 0.3)
     epochs = getattr(config, 'TRAINING_EPOCHS', 800)
+    weight_decay = getattr(config, 'TRAINING_WEIGHT_DECAY', 1e-4)
 
-    opt = torch.optim.Adam(model.parameters(), lr=lr,
-                       weight_decay=getattr(config, 'TRAINING_WEIGHT_DECAY', 1e-4))
+    Yk_tr_log = np.log(np.maximum(Y_risk_tr, LOG_EPSILON))
+
+    X = torch.tensor(X_tr, dtype=torch.float32)
+    yr = torch.tensor(Y_ret_tr, dtype=torch.float32)
+    yk_log = torch.tensor(Yk_tr_log, dtype=torch.float32)
+
+    model = HeteroscedasticDualHeadNN(in_dim=D, hidden_dims=arch, dropout=0.2)
+    opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     model.train()
     best_loss = float('inf')
     patience = 0
     for ep in range(epochs):
         opt.zero_grad()
-        out = model(X)
-        pred_ret = out[:, 0]
-        pred_risk = F.softplus(out[:, 1])
-        loss = F.huber_loss(pred_ret, yr, delta=delta) + F.huber_loss(pred_risk, yk, delta=delta)
+        pred = model(X)
+        loss, _, _ = heteroscedastic_loss(pred, yr, yk_log)
         if torch.isnan(loss):
             break
         loss.backward()
@@ -439,9 +448,10 @@ def _train_fold_torch(X_tr, Y_ret_tr, Y_risk_tr, X_te, Y_ret_te, Y_risk_te):
     model.eval()
     with torch.no_grad():
         Xt = torch.tensor(X_te, dtype=torch.float32)
-        out = model(Xt)
-        pr = out[:, 0].numpy()
-        pk = F.softplus(out[:, 1]).numpy()
+        ret_mu, _, risk_log_mu, _ = model(Xt)
+        pr = ret_mu.numpy()
+        # Back-transform log-space volatility to actual scale for MAE comparison
+        pk = np.exp(risk_log_mu.numpy())
 
     return np.mean(np.abs(pr - Y_ret_te)), np.mean(np.abs(pk - Y_risk_te))
 

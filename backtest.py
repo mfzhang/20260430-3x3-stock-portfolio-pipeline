@@ -272,10 +272,14 @@ def _run_single_fold(X, Y_ret, Y_risk, sample_tickers, meta,
     models = []
     D = X_tr_n.shape[1]
 
+    # Log-transform volatility target for heteroscedastic NLL (Andersen et al. 2003)
+    LOG_EPSILON = 1e-4
+    Y_risk_tr_log = np.log(np.maximum(Y_risk_tr, LOG_EPSILON))
+
     # Tensor conversion (once, outside ensemble loop)
     Xt = torch.tensor(X_tr_n, dtype=torch.float32)
     yr = torch.tensor(Y_ret_tr, dtype=torch.float32)
-    yk = torch.tensor(Y_risk_tr, dtype=torch.float32)
+    yk = torch.tensor(Y_risk_tr_log, dtype=torch.float32)
 
     # Train/val split for early stopping (80/20, shared across ensemble members)
     # Note: use X_fit (not X_tr) to avoid shadowing the outer X_tr numpy variable
@@ -293,16 +297,16 @@ def _run_single_fold(X, Y_ret, Y_risk, sample_tickers, meta,
     delta = getattr(config, 'TRAINING_HUBER_DELTA', 0.3)
     epochs = getattr(config, 'TRAINING_EPOCHS', 800)  # use config value directly
 
+    from models import HeteroscedasticDualHeadNN, heteroscedastic_loss
+
     for e in range(n_ensemble):
         torch.manual_seed(42 + e * 17)
         arch = getattr(config, 'TRAINING_NN_ARCHITECTURE', [64, 32, 16])
-        layers = []
-        in_dim = D
-        for h in arch:
-            layers.extend([nn.Linear(in_dim, h), nn.ReLU(), nn.Dropout(0.2)])
-            in_dim = h
-        layers.append(nn.Linear(in_dim, 2))
-        model = nn.Sequential(*layers)
+        if isinstance(arch, str):
+            arch_map = {'small': [32, 16], 'medium': [64, 32, 16],
+                        'large': [128, 64, 32]}
+            arch = arch_map.get(arch, [64, 32, 16])
+        model = HeteroscedasticDualHeadNN(in_dim=D, hidden_dims=arch, dropout=0.2)
         opt = torch.optim.Adam(model.parameters(), lr=lr,
                        weight_decay=getattr(config, 'TRAINING_WEIGHT_DECAY', 1e-4))
 
@@ -313,9 +317,8 @@ def _run_single_fold(X, Y_ret, Y_risk, sample_tickers, meta,
             # Train step (dropout active)
             model.train()
             opt.zero_grad()
-            out = model(X_fit)
-            train_loss = F.huber_loss(out[:, 0], yr_fit, delta=delta) + \
-                         F.huber_loss(F.softplus(out[:, 1]), yk_fit, delta=delta)
+            pred = model(X_fit)
+            train_loss, _, _ = heteroscedastic_loss(pred, yr_fit, yk_fit)
             if torch.isnan(train_loss):
                 break
             train_loss.backward()
@@ -324,9 +327,8 @@ def _run_single_fold(X, Y_ret, Y_risk, sample_tickers, meta,
             # Val step (dropout off)
             model.eval()
             with torch.no_grad():
-                val_out = model(X_val)
-                val_loss = F.huber_loss(val_out[:, 0], yr_val, delta=delta) + \
-                           F.huber_loss(F.softplus(val_out[:, 1]), yk_val, delta=delta)
+                pred_val = model(X_val)
+                val_loss, _, _ = heteroscedastic_loss(pred_val, yr_val, yk_val)
                 val_loss_item = val_loss.item()
 
             if val_loss_item < best_val:
@@ -345,22 +347,24 @@ def _run_single_fold(X, Y_ret, Y_risk, sample_tickers, meta,
 
         models.append(model)
         if verbose:
-            print(f"    NN #{e+1}: val_loss={best_val:.6f} at epoch {best_ep+1}, stopped at {ep+1}")
+            print(f"    NN #{e+1}: val_NLL={best_val:.6f} at epoch {best_ep+1}, stopped at {ep+1}")
 
     # Predict on test samples
     X_te_t = torch.tensor(X_te_n, dtype=torch.float32)
     all_pred_ret = np.zeros(X_te_n.shape[0])
-    all_pred_risk = np.zeros(X_te_n.shape[0])
+    all_pred_risk_log = np.zeros(X_te_n.shape[0])
 
     for model in models:
         model.eval()
         with torch.no_grad():
-            out = model(X_te_t)
-            all_pred_ret += out[:, 0].numpy()
-            all_pred_risk += F.softplus(out[:, 1]).numpy()
+            ret_mu, _, risk_log_mu, _ = model(X_te_t)
+            all_pred_ret += ret_mu.numpy()
+            all_pred_risk_log += risk_log_mu.numpy()
 
     all_pred_ret /= n_ensemble
-    all_pred_risk /= n_ensemble
+    all_pred_risk_log /= n_ensemble
+    # Back-transform log-volatility to actual scale (Andersen 2003 convention)
+    all_pred_risk = np.exp(all_pred_risk_log)
 
     # Aggregate per ticker: mean prediction and mean actual
     test_tickers_list = sorted(test_tickers)
@@ -621,39 +625,42 @@ def _cross_sector_diagnostic(X, Y_ret, Y_risk, sample_tickers, ticker_sectors, v
             X_tr_n = np.clip((X_tr_s - mu) / sigma, -5, 5)
             X_te_n = np.clip((X_te_s - mu) / sigma, -5, 5)
 
-            # Quick single-model training (200 epochs)
+            # Quick single-model training (200 epochs, heteroscedastic NLL)
             D = X_tr_n.shape[1]
             torch.manual_seed(42)
             arch = getattr(config, 'TRAINING_NN_ARCHITECTURE', [64, 32, 16])
-            layers = []
-            in_dim = D
-            for h in arch:
-                layers.extend([nn.Linear(in_dim, h), nn.ReLU(), nn.Dropout(0.2)])
-                in_dim = h
-            layers.append(nn.Linear(in_dim, 2))
-            model = nn.Sequential(*layers)
+            if isinstance(arch, str):
+                arch_map = {'small': [32, 16], 'medium': [64, 32, 16],
+                            'large': [128, 64, 32]}
+                arch = arch_map.get(arch, [64, 32, 16])
 
-            delta = getattr(config, 'TRAINING_HUBER_DELTA', 0.3)
+            from models import HeteroscedasticDualHeadNN, heteroscedastic_loss
+            model = HeteroscedasticDualHeadNN(in_dim=D, hidden_dims=arch, dropout=0.2)
             opt = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
+
+            # Log-transform volatility target (Andersen et al. 2003)
+            LOG_EPSILON = 1e-4
+            Yk_tr_log = np.log(np.maximum(Yk_tr, LOG_EPSILON))
+
             Xt = torch.tensor(X_tr_n, dtype=torch.float32)
             yr = torch.tensor(Y_tr, dtype=torch.float32)
-            yk = torch.tensor(Yk_tr, dtype=torch.float32)
+            yk = torch.tensor(Yk_tr_log, dtype=torch.float32)
 
             model.train()
             for ep in range(200):
                 opt.zero_grad()
-                out = model(Xt)
-                loss = F.huber_loss(out[:, 0], yr, delta=delta) + \
-                       F.huber_loss(F.softplus(out[:, 1]), yk, delta=delta)
+                pred = model(Xt)
+                loss, _, _ = heteroscedastic_loss(pred, yr, yk)
                 if torch.isnan(loss):
                     break
                 loss.backward()
                 opt.step()
 
-            # Predict on test sector
+            # Predict on test sector (return mean only; risk not consumed downstream)
             model.eval()
             with torch.no_grad():
-                pred = model(torch.tensor(X_te_n, dtype=torch.float32))[:, 0].numpy()
+                ret_mu, _, _, _ = model(torch.tensor(X_te_n, dtype=torch.float32))
+                pred = ret_mu.numpy()
 
             # Aggregate per ticker
             test_tickers_in = sorted(set(sample_tickers[test_mask]))
