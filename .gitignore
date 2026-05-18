@@ -36,3 +36,7 @@ task*.log
 optuna_storage.db
 optuna_stage1.log
 optuna_smoke.db
+
+# v2.3.10 Optuna storage (per-version)
+optuna_storage_v*.db
+optuna_smoke_v*.db
