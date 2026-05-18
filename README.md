@@ -20,6 +20,8 @@ The without-SNDK numbers are reported as primary because the with-SNDK aggregate
 
 Headline hyperparameters from Optuna (60-trial TPE search over 6 dimensions, Trial #58 best): `medium [64,32,16] architecture`, `lr=2.5e-4`, `huber_delta=0.5`, `weight_decay=1.6e-4`, `var_threshold=0.002`, `corr_threshold=0.084`. See [Hyperparameter optimization](#hyperparameter-optimization-stage-1) and [Stage 2 production retrain](#stage-2-production-retrain) sections below for details.
 
+**Subsequent work**: v2.3.11 adds a [transaction cost analysis](#stage-1--transaction-cost-analysis-v2311) calibrated to the Korean broker route (Korea Investment & Securities). v2.3.12 refactors the NN to a [heteroscedastic dual-head architecture](#v2312--heteroscedastic-nn-with-log-volatility-target) trained with Gaussian NLL on log-transformed volatility, addressing systematic risk over-prediction observed in v2.3.7 production output. Smoke tests passed across two architectures; production retrain in progress at the time of writing.
+
 ## What the pipeline does
 
 1. **Screen the investment universe** (`screener.py`). Auto-discovers seeds from S&P 500 + NASDAQ-100 using GICS industry matching, combines with a small list of niche anchor tickers, and filters to ~84 stocks across 7 sectors (AI Compute, Neuromodulation, CNS Pharma, Digital Health, Space/Aerospace, Solar/Clean Energy, ETF benchmarks).
@@ -57,6 +59,7 @@ python stage2_retrain.py --include-sndk   # with SNDK (sensitivity)
 # Auxiliary analysis tools
 python compute_momentum_baseline.py       # NN vs proper-momentum baseline
 python fix_spy_benchmark.py               # SPY 3-month forward benchmark
+python transaction_cost_analysis.py       # KIS broker TC sensitivity grid
 
 # Individual modules
 python screener.py
@@ -293,6 +296,97 @@ Stage 2 produces three analysis artifacts beyond aggregate metrics:
 
 These three were initially proposed as analysis asks from a quant friend during v2.3.6, then deferred to Stage 2 to avoid disturbing the running Optuna study. They are now generated automatically by `stage2_retrain.py`.
 
+## Stage 1 — Transaction cost analysis (v2.3.11)
+
+Backtest alpha is paper-alpha. To gate deployment, v2.3.11 adds a transaction cost model calibrated to the Korean retail broker route (Korea Investment & Securities, KIS) for US equities.
+
+### Model
+
+`transaction_cost_analysis.py` decomposes round-trip TC for each ticker as:
+
+- Commission: 0.04% per side (KIS US route)
+- FX spread: 0.10% per side (KRW ↔ USD)
+- Bid-ask spread: 0.05% per side for large-cap (mcap ≥ $10B), 0.20% for small-cap
+- Market impact: cube-root model, `0.10 × (size / ADV)^(1/3)`
+
+ADV (average daily volume) and market cap are fetched via yfinance and cached to `tc_adv_cache.json`. USD/KRW rate is fetched live and cached for the run.
+
+### Sensitivity grid
+
+Three position sizes × three turnover scenarios against the Fold 2-5 mean paper alpha (+8.07%p ± 1.83%p / quarter):
+
+| Position (₩) | Turnover/y | Quarterly TC | Net alpha |
+|---:|---:|---:|---:|
+| 1,000,000 | 2 | 0.28% | **+7.79%p** |
+| 1,000,000 | 4 | 0.52% | **+7.55%p** |
+| 1,000,000 | 12 | 1.46% | **+6.62%p** |
+| 5,000,000 | 4 | 0.64% | **+7.43%p** |
+| 5,000,000 | 12 | 1.83% | **+6.24%p** |
+
+All 9 grid cells (full table in `results/tc_analysis_summary.md`) clear the +3%p deploy gate. The stress case (₩5M position, monthly rebalance) still nets +6.24%p — TC erosion is dominated by FX spread and commission, not market impact (impact only matters for small-cap tickers, which the model rarely picks).
+
+The main scenario (₩1M × turn=4, i.e. quarterly rebalance) carries +7.55%p net alpha. For a ₩20M portfolio that's ~₩1.5M / quarter — material at this position size.
+
+## v2.3.12 — Heteroscedastic NN with log-volatility target
+
+v2.3.7's production NN systematically over-predicted volatility for defensive tickers (RTX, JNJ, MDT predicted 95-200%, realized 16-22%). Two root causes:
+
+1. **Softplus on point-estimate volatility.** No uncertainty quantification — the NN was forced to output a single number for risk, and large ensemble disagreement was hidden inside the mean.
+2. **Linear-scale Y_risk target.** Realized 3-month volatility is right-skewed (approximately lognormal); fitting it on a linear scale puts excess weight on the high-vol tail and pulls predictions upward.
+
+v2.3.12 addresses both.
+
+### Architecture: dual-head heteroscedastic NN
+
+`models.py::HeteroscedasticDualHeadNN` outputs `(mu, logvar)` for both return and risk. `logvar` is clamped to `[-10, 5]` for numerical stability; the risk head's logvar bias is initialized to -2.0 (initial sigma ≈ 0.37, in the right order of magnitude for log-vol residuals).
+
+The shared trunk uses BatchNorm + Linear + ReLU + Dropout blocks; two independent heads then project to `(mu, logvar)` for return and risk respectively. All ensemble members in `stage2_retrain.py` and all NN call sites in `run.py`, `backtest.py`, and `historical.py` use this class. The legacy `nn.Sequential` + softplus path is removed.
+
+### Loss: Gaussian negative log-likelihood
+
+`models.py::heteroscedastic_loss` implements the standard Gaussian NLL of Kendall & Gal (2017):
+
+```
+L = 0.5 × ( exp(−logvar) · (y − μ)² + logvar )
+```
+
+The `exp(−logvar)` term lets the model down-weight high-uncertainty samples, and the `+logvar` term penalizes the model for predicting high uncertainty everywhere. A backup variant `heteroscedastic_loss_beta` (Seitzer et al., 2022) is included but disabled by default — activated only if the calibration plot from the first production retrain shows small-sigma compression pathology.
+
+### Target: log-transformed volatility
+
+`Y_risk → np.log(np.maximum(Y_risk, LOG_EPSILON))` with `LOG_EPSILON = 1e-4`. This handles 22 zero-volatility samples by mapping them to log(1e-4) = -9.2 (treated as outliers by the ensemble + early stopping). Inference back-transforms via `risk_mean = np.exp(risk_log_mu)` — the lognormal median (Andersen, Bollerslev, Diebold & Labys, 2003, *Econometrica*), which is the appropriate point estimate for a right-skewed distribution.
+
+### Pipeline propagation
+
+The log-transform is applied consistently in `stage2_retrain.py`, `historical.py`, `run.py`, and `backtest.py` before tensor conversion. Inference back-transforms via `exp()` for the linear-scale prediction; the log-space mean and sigma are also propagated for downstream uncertainty quantification:
+
+- `pred_risk` — linear-scale (back-transformed) volatility prediction
+- `pred_risk_log_mean` / `pred_risk_log_sigma` — log-space mean and per-sample aleatoric uncertainty
+- `pred_risk_log_aleatoric` — aleatoric component (sigma from the NLL head)
+- Epistemic uncertainty derived from ensemble variance in log-space
+
+These four columns are added to `full_ranking.csv` per fold.
+
+### Validation
+
+Two smoke tests passed 6/6 health checks each:
+
+| Smoke | Architecture | Rank corr | Universe NN risk mean | Defensive ticker recovery |
+|---|---|---|---|---|
+| Large `[128,64,32]` | sanity check | +0.4009 (p=2.3e-5) | 26.2% | MDT 20.8% vs realized 20.3% |
+| Medium `[64,32,16]` | Optuna best (Trial #58) | +0.3906 | 26.3% | LLY 24.7% vs 26.4%; BA 31.5% vs 33.8% |
+
+The broken intermediate v2.3.8 production had universe NN risk mean of 86.2% with defensive tickers in the 95-200% range. v2.3.12 brings both the universe mean and per-ticker calibration into the realistic 20-30% band. The fix is robust across architectures.
+
+### Production retrain protocol
+
+The Optuna best config (Trial #58: medium arch, lr=2.5e-4, wd=1.64e-4) is retrained at `N_ENSEMBLE=20` with the v2.3.12 architecture. Decision flow:
+
+- **Standard NLL (default)** is used for the first retrain.
+- A calibration plot (predicted log-sigma vs. realized log-residual) is checked before accepting the result.
+- If the plot shows small-sigma compression and large-sigma underlearning (a known pathology of standard NLL — Seitzer et al., 2022), the beta-NLL backup loss is activated and the model is retrained once.
+- Otherwise the standard NLL result is final.
+
 ## Known limitations
 
 - **Fold 1 outlier inflates the headline alpha when SNDK is included.** SNDK's post-IPO run drives Fold 1 alpha to +44.9%p (vs +7.8%p in the without-SNDK config); the robust estimate across Folds 2–5 is closer to +8.5%p in either configuration. Headlines should be read with the SNDK exclusion noted. See [Sensitivity analysis](#sensitivity-analysis-sndk-exclusion).
@@ -305,6 +399,7 @@ These three were initially proposed as analysis asks from a quant friend during 
 - **Sector concentration in selection step.** No diversification constraint; top 5 often cluster in 2 sectors (typically AI Compute + Neuromodulation). The v2.3.3 ablation showed cross-sector rank-correlation is much lower than within-sector, so forced diversification would pick lower-scoring stocks. Current default accepts the concentration.
 - **MC Dropout passes per ensemble member shrunk from 6 to 1 at N=20.** `MC_FORWARD_PASSES = 30` is divided across the ensemble (`30 // N_ENSEMBLE`), so at N=5 each model did 6 passes but at N=20 each model does 1. Uncertainty estimates rely more on ensemble variance than dropout sampling. This is a design choice (ensemble averaging is itself approximate Bayesian, Gal & Ghahramani 2016) but the trade-off isn't characterized empirically.
 - **yfinance rate limits.** Heavy S&P 500 batch downloads occasionally cause cross-asset fetches to return truncated history. The tz-safety fix in `training_universe.py` means this degrades gracefully, but ideally the macro loads should happen before the big batch. Separately, `fredapi` lacks an internal socket timeout (`socket.setdefaulttimeout(120)` is set in `fetch_fred_data` to mitigate; addresses a real 30-min stall observed during Stage 1 prep).
+- **Risk metric is reported as the lognormal median.** v2.3.12 log-transforms the risk target during training; the inference back-transform `risk_mean = exp(risk_log_mu)` yields the median of the implied lognormal distribution, not the mean. For symmetric ±1.96σ intervals, work in log-space: `lower = exp(μ − 1.96σ)`, `upper = exp(μ + 1.96σ)`. The linear-scale `pred_risk` column in `full_ranking.csv` follows the median convention; the log-space columns (`pred_risk_log_mean`, `pred_risk_log_sigma`) are also exported for downstream analysis.
 - **This is not investment advice.** Predictions carry ±12%p MAE on return and ±9%p on risk. Realized Sharpe will likely be 30–35% lower than predicted Sharpe. Monthly tracking against actual realized returns is the only honest validation; backtests don't prove future performance.
 
 ## Output
@@ -316,6 +411,8 @@ After a full run, `results/` contains:
 - `fig1_scatter.png` through `fig8_dashboard.png` — auto-generated figures
 - `backtest_results.json` — if `--backtest` was run
 - `backtest_cache.npz` — cached training matrix for faster re-runs
+- `results/tc_analysis_summary.{md,json}` — v2.3.11 transaction cost sensitivity grid
+- `tc_adv_cache.json` — cached ADV / market-cap data for the TC model
 
 After Stage 1 + Stage 2 runs:
 
@@ -353,8 +450,8 @@ Planned upgrades:
 
 - **Composite-score coefficient optimization**: grid search over `sentiment_weight`, `uncertainty_penalty`, `event_risk_penalty`, `EVENT_RISK_PENALTY`. The Optuna Stage 1 search intentionally excluded these to keep the NN training search space focused. Stage 1's discovery that the network converges in 200-400 epochs at the optimal hyperparameters means a follow-up Stage 3 study is feasible at production ensemble size (N=20) within ~24h.
 - **Survivorship bias correction**: use point-in-time S&P 500 + NASDAQ-100 composition data (Compustat / CRSP / Bloomberg) instead of current composition. Currently the training universe overrepresents survivors, which biases the model's expectations.
-- **Transaction cost + slippage modeling**: incorporate realistic frictions (commissions, bid-ask spread, FX, taxes) into backtest alpha. For monthly rebalancing of small ($KRW 20M) positions, expected friction is several %p/year.
+- ~~**Transaction cost + slippage modeling**~~ — implemented in v2.3.11 (see [Stage 1 — Transaction cost analysis](#stage-1--transaction-cost-analysis-v2311)). Korean broker (KIS) calibration with cube-root market impact; main scenario (₩1M × quarterly turnover) yields +7.55%p net alpha. Still future work: live tracking of realized slippage against the model's per-trade prediction to refine the impact constant.
 - **Uncertainty calibration**: verify that predicted standard deviations actually match realized errors (calibration plots, temperature scaling if needed, following Guo et al., 2017). At N=20 with 1 MC pass per model, the dropout-based aleatoric component is weak; characterizing whether ensemble variance alone is well-calibrated would inform whether to revisit MC dropout count.
-- **Heteroscedastic output + aleatoric / epistemic decomposition**: output `(mean, log_var)` pairs trained with negative log-likelihood loss, following Kendall & Gal (2017). Separates irreducible market noise from reducible model uncertainty — useful for portfolio selection and confidence interval reporting.
+- ~~**Heteroscedastic output + aleatoric / epistemic decomposition**~~ — implemented in v2.3.12 (see [v2.3.12 — Heteroscedastic NN with log-volatility target](#v2312--heteroscedastic-nn-with-log-volatility-target)). Standard Gaussian NLL with log-transformed volatility target; aleatoric (per-sample log-sigma) and epistemic (ensemble variance) propagated separately. Production retrain in progress at N=20 with calibration-plot review before acceptance.
 - **Hierarchical Bayesian structure over sectors**: sector-level priors with ticker-level posteriors (analogous to multi-level GLM with ROI-level random effects in fMRI analysis). Expected to improve cross-sector transfer, which is currently weak (+0.027 rank corr in the v2.3.3 ablation; not re-measured at Stage 2).
 - **Disentangle macro from the per-ticker feature matrix.** The v2.3.3 ablation showed that macro features hurt cross-sectional rank correlation (+0.465 → +0.526 when removed), because all tickers at a given snapshot share identical macro values — the ensemble partially overfits to time-synchronous signals that carry no inter-ticker information. A cleaner design would route macro features through the blend-optimizer's regime gate only, rather than concatenating them into each ticker's feature vector.
