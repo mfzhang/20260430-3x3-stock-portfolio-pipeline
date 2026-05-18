@@ -7,6 +7,9 @@ in the release cleanup because their outputs were not consumed by the pipeline.
 """
 
 import numpy as np
+import torch
+import torch.nn as torch_nn
+
 from config import *
 
 
@@ -143,3 +146,90 @@ class MatrixNetwork:
     @property
     def n_params(self):
         return sum(l['W'].size + l['b'].size for l in self.layers)
+
+class HeteroscedasticDualHeadNN(torch_nn.Module):
+    """Dual-head NN with aleatoric uncertainty for return and risk targets.
+
+    Output: (ret_mu, ret_logvar, risk_mu, risk_logvar) per sample.
+    Loss:   Gaussian NLL per head, summed.
+
+    Refs:
+      - Nix & Weigend (1994), Estimating mean and variance.
+      - Kendall & Gal (2017), What uncertainties do we need in Bayesian DL.
+    """
+
+    LOGVAR_MIN = -10.0
+    LOGVAR_MAX = 5.0
+
+    def __init__(self, in_dim, hidden_dims, dropout=0.2):
+        super().__init__()
+        layers = []
+        prev = in_dim
+        for h in hidden_dims:
+            layers.append(torch_nn.Linear(prev, h))
+            layers.append(torch_nn.ReLU())
+            layers.append(torch_nn.Dropout(dropout))
+            prev = h
+        self.trunk = torch_nn.Sequential(*layers)
+        # Two heads, each outputting (mu, logvar)
+        self.head_ret = torch_nn.Linear(prev, 2)
+        self.head_risk = torch_nn.Linear(prev, 2)
+
+        # Bias init for logvar -> initial sigma ~ 0.1 (reasonable starting point)
+        with torch.no_grad():
+            self.head_ret.bias[1].fill_(-2.0)
+            self.head_risk.bias[1].fill_(-2.0)
+
+    def forward(self, x):
+        h = self.trunk(x)
+        r = self.head_ret(h)
+        k = self.head_risk(h)
+        ret_mu = r[..., 0]
+        ret_logvar = torch.clamp(r[..., 1], self.LOGVAR_MIN, self.LOGVAR_MAX)
+        risk_mu = k[..., 0]
+        risk_logvar = torch.clamp(k[..., 1], self.LOGVAR_MIN, self.LOGVAR_MAX)
+        return ret_mu, ret_logvar, risk_mu, risk_logvar
+
+
+def gaussian_nll(mu, logvar, target):
+    """Negative log-likelihood for a Gaussian with predicted mean and log-variance.
+
+    NLL = 0.5 * [ (y - mu)^2 / sigma^2 + log(sigma^2) ]
+    Mean over batch.
+    """
+    var = logvar.exp()
+    return 0.5 * ((target - mu) ** 2 / var + logvar).mean()
+
+
+def heteroscedastic_loss(pred, y_ret, y_risk, risk_weight=1.0):
+    """Total loss for dual-head heteroscedastic NN.
+
+    pred: tuple from HeteroscedasticDualHeadNN.forward()
+    """
+    ret_mu, ret_logvar, risk_mu, risk_logvar = pred
+    loss_ret = gaussian_nll(ret_mu, ret_logvar, y_ret)
+    loss_risk = gaussian_nll(risk_mu, risk_logvar, y_risk)
+    return loss_ret + risk_weight * loss_risk, loss_ret.item(), loss_risk.item()
+
+def beta_nll(mu, logvar, target, beta=0.5):
+    """Beta-NLL loss (Seitzer et al. 2022, ICLR).
+
+    Weights NLL by detached sigma^(2*beta) to prevent gradient pathology
+    where small-sigma samples dominate training.
+
+    beta=0:   standard NLL
+    beta=0.5: MSE-like gradient (recommended)
+    beta=1:   sigma^2 weighting (strong)
+    """
+    var = logvar.exp()
+    nll = 0.5 * ((target - mu) ** 2 / var + logvar)
+    weight = var.detach() ** beta
+    return (weight * nll).mean()
+
+
+def heteroscedastic_loss_beta(pred, y_ret, y_risk, risk_weight=1.0, beta=0.5):
+    """Beta-NLL version of dual-head heteroscedastic loss."""
+    ret_mu, ret_logvar, risk_mu, risk_logvar = pred
+    loss_ret = beta_nll(ret_mu, ret_logvar, y_ret, beta)
+    loss_risk = beta_nll(risk_mu, risk_logvar, y_risk, beta)
+    return loss_ret + risk_weight * loss_risk, loss_ret.item(), loss_risk.item()
