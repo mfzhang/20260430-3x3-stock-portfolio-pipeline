@@ -40,3 +40,15 @@ optuna_smoke.db
 # v2.3.10 Optuna storage (per-version)
 optuna_storage_v*.db
 optuna_smoke_v*.db
+
+
+# Local backup files (pre-deploy snapshots)
+*.v238backup
+*.v2312predeploy
+*.predeploy
+*.backup
+
+# Diagnostic + smoke + synthetic test scripts (local experiments)
+diag_*.py
+smoke_*.py
+test_hetero_*.py
