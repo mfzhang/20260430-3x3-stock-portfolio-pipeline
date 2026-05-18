@@ -92,3 +92,7 @@ TRAINING_HUBER_DELTA = 0.5
 # Feature selection thresholds (Optuna best)
 VAR_THRESHOLD = 0.001971224419059394             # ~0.00197
 CORR_THRESHOLD = 0.0837536123288791              # ~0.0838
+
+# SEC EDGAR User-Agent (required by SEC fair-use policy)
+# Format: 'Real Name email@domain' — fill in locally, keep empty on GitHub
+SEC_USER_AGENT = ''
