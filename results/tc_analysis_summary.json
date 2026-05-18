@@ -1,0 +1,548 @@
+{
+  "tc_params": {
+    "commission_pct": 0.0004,
+    "spread_large_cap_pct": 0.0005,
+    "spread_small_cap_pct": 0.002,
+    "large_cap_threshold_usd": 10000000000.0,
+    "slippage_pct": 0.0005,
+    "fx_spread_pct": 0.001,
+    "impact_constant": 0.1
+  },
+  "usd_krw": 1497.97998046875,
+  "usd_krw_fetched_at": "2026-05-18 15:40",
+  "paper_alpha_baseline": 0.08072564576020445,
+  "paper_alpha_std": 0.018267336327764276,
+  "grid": [
+    {
+      "position_size_krw": 1000000,
+      "turnover_per_year": 2,
+      "mean_quarterly_tc_pct": 0.002844581629942326,
+      "mean_net_alpha_pct": 0.07788106413026213,
+      "std_net_alpha_pct": 0.016472042974180052,
+      "per_fold": [
+        {
+          "fold_id": 1,
+          "mean_per_leg_pct": 0.002341555993756634,
+          "annual_tc_pct": 0.011366223975026537,
+          "quarterly_tc_pct": 0.0028415559937566342,
+          "paper_3m_return": 0.1155163240661485,
+          "paper_alpha_vs_spy": 0.0784233141130162,
+          "net_3m_return": 0.11267476807239188,
+          "net_alpha_vs_spy": 0.07558175811925957
+        },
+        {
+          "fold_id": 2,
+          "mean_per_leg_pct": 0.0023589947366447345,
+          "annual_tc_pct": 0.011435978946578938,
+          "quarterly_tc_pct": 0.0028589947366447345,
+          "paper_3m_return": 0.1148936965433038,
+          "paper_alpha_vs_spy": 0.0778930699046926,
+          "net_3m_return": 0.11203470180665906,
+          "net_alpha_vs_spy": 0.07503407516804786
+        },
+        {
+          "fold_id": 3,
+          "mean_per_leg_pct": 0.0026823689411188964,
+          "annual_tc_pct": 0.012729475764475586,
+          "quarterly_tc_pct": 0.0031823689411188964,
+          "paper_3m_return": 0.0921261978531712,
+          "paper_alpha_vs_spy": 0.0550319412633588,
+          "net_3m_return": 0.0889438289120523,
+          "net_alpha_vs_spy": 0.051849572322239905
+        },
+        {
+          "fold_id": 4,
+          "mean_per_leg_pct": 0.0019998510738864625,
+          "annual_tc_pct": 0.00999940429554585,
+          "quarterly_tc_pct": 0.0024998510738864625,
+          "paper_3m_return": 0.1235024645885697,
+          "paper_alpha_vs_spy": 0.0864939686743801,
+          "net_3m_return": 0.12100261351468324,
+          "net_alpha_vs_spy": 0.08399411760049363
+        },
+        {
+          "fold_id": 5,
+          "mean_per_leg_pct": 0.0023401374043049037,
+          "annual_tc_pct": 0.011360549617219615,
+          "quarterly_tc_pct": 0.0028401374043049037,
+          "paper_3m_return": 0.1428061706176869,
+          "paper_alpha_vs_spy": 0.1057859348455746,
+          "net_3m_return": 0.139966033213382,
+          "net_alpha_vs_spy": 0.10294579744126969
+        }
+      ]
+    },
+    {
+      "position_size_krw": 1000000,
+      "turnover_per_year": 4,
+      "mean_quarterly_tc_pct": 0.005189163259884654,
+      "mean_net_alpha_pct": 0.07553648250031982,
+      "std_net_alpha_pct": 0.016607022872989496,
+      "per_fold": [
+        {
+          "fold_id": 1,
+          "mean_per_leg_pct": 0.002341555993756634,
+          "annual_tc_pct": 0.020732447950053072,
+          "quarterly_tc_pct": 0.005183111987513268,
+          "paper_3m_return": 0.1155163240661485,
+          "paper_alpha_vs_spy": 0.0784233141130162,
+          "net_3m_return": 0.11033321207863524,
+          "net_alpha_vs_spy": 0.07324020212550293
+        },
+        {
+          "fold_id": 2,
+          "mean_per_leg_pct": 0.0023589947366447345,
+          "annual_tc_pct": 0.020871957893157878,
+          "quarterly_tc_pct": 0.005217989473289469,
+          "paper_3m_return": 0.1148936965433038,
+          "paper_alpha_vs_spy": 0.0778930699046926,
+          "net_3m_return": 0.10967570707001432,
+          "net_alpha_vs_spy": 0.07267508043140312
+        },
+        {
+          "fold_id": 3,
+          "mean_per_leg_pct": 0.0026823689411188964,
+          "annual_tc_pct": 0.023458951528951173,
+          "quarterly_tc_pct": 0.005864737882237793,
+          "paper_3m_return": 0.0921261978531712,
+          "paper_alpha_vs_spy": 0.0550319412633588,
+          "net_3m_return": 0.0862614599709334,
+          "net_alpha_vs_spy": 0.04916720338112101
+        },
+        {
+          "fold_id": 4,
+          "mean_per_leg_pct": 0.0019998510738864625,
+          "annual_tc_pct": 0.0179988085910917,
+          "quarterly_tc_pct": 0.004499702147772925,
+          "paper_3m_return": 0.1235024645885697,
+          "paper_alpha_vs_spy": 0.0864939686743801,
+          "net_3m_return": 0.11900276244079677,
+          "net_alpha_vs_spy": 0.08199426652660717
+        },
+        {
+          "fold_id": 5,
+          "mean_per_leg_pct": 0.0023401374043049037,
+          "annual_tc_pct": 0.02072109923443923,
+          "quarterly_tc_pct": 0.005180274808609808,
+          "paper_3m_return": 0.1428061706176869,
+          "paper_alpha_vs_spy": 0.1057859348455746,
+          "net_3m_return": 0.1376258958090771,
+          "net_alpha_vs_spy": 0.10060566003696479
+        }
+      ]
+    },
+    {
+      "position_size_krw": 1000000,
+      "turnover_per_year": 12,
+      "mean_quarterly_tc_pct": 0.014567489779653959,
+      "mean_net_alpha_pct": 0.0661581559805505,
+      "std_net_alpha_pct": 0.01716350630889761,
+      "per_fold": [
+        {
+          "fold_id": 1,
+          "mean_per_leg_pct": 0.002341555993756634,
+          "annual_tc_pct": 0.05819734385015922,
+          "quarterly_tc_pct": 0.014549335962539805,
+          "paper_3m_return": 0.1155163240661485,
+          "paper_alpha_vs_spy": 0.0784233141130162,
+          "net_3m_return": 0.1009669881036087,
+          "net_alpha_vs_spy": 0.0638739781504764
+        },
+        {
+          "fold_id": 2,
+          "mean_per_leg_pct": 0.0023589947366447345,
+          "annual_tc_pct": 0.05861587367947363,
+          "quarterly_tc_pct": 0.014653968419868407,
+          "paper_3m_return": 0.1148936965433038,
+          "paper_alpha_vs_spy": 0.0778930699046926,
+          "net_3m_return": 0.10023972812343539,
+          "net_alpha_vs_spy": 0.06323910148482419
+        },
+        {
+          "fold_id": 3,
+          "mean_per_leg_pct": 0.0026823689411188964,
+          "annual_tc_pct": 0.06637685458685352,
+          "quarterly_tc_pct": 0.01659421364671338,
+          "paper_3m_return": 0.0921261978531712,
+          "paper_alpha_vs_spy": 0.0550319412633588,
+          "net_3m_return": 0.07553198420645782,
+          "net_alpha_vs_spy": 0.03843772761664542
+        },
+        {
+          "fold_id": 4,
+          "mean_per_leg_pct": 0.0019998510738864625,
+          "annual_tc_pct": 0.0499964257732751,
+          "quarterly_tc_pct": 0.012499106443318775,
+          "paper_3m_return": 0.1235024645885697,
+          "paper_alpha_vs_spy": 0.0864939686743801,
+          "net_3m_return": 0.11100335814525092,
+          "net_alpha_vs_spy": 0.07399486223106132
+        },
+        {
+          "fold_id": 5,
+          "mean_per_leg_pct": 0.0023401374043049037,
+          "annual_tc_pct": 0.05816329770331769,
+          "quarterly_tc_pct": 0.014540824425829423,
+          "paper_3m_return": 0.1428061706176869,
+          "paper_alpha_vs_spy": 0.1057859348455746,
+          "net_3m_return": 0.12826534619185748,
+          "net_alpha_vs_spy": 0.09124511041974517
+        }
+      ]
+    },
+    {
+      "position_size_krw": 2000000,
+      "turnover_per_year": 2,
+      "mean_quarterly_tc_pct": 0.0030745030159146543,
+      "mean_net_alpha_pct": 0.07765114274428979,
+      "std_net_alpha_pct": 0.016482295870812114,
+      "per_fold": [
+        {
+          "fold_id": 1,
+          "mean_per_leg_pct": 0.002586286216188669,
+          "annual_tc_pct": 0.012345144864754676,
+          "quarterly_tc_pct": 0.003086286216188669,
+          "paper_3m_return": 0.1155163240661485,
+          "paper_alpha_vs_spy": 0.0784233141130162,
+          "net_3m_return": 0.11243003784995984,
+          "net_alpha_vs_spy": 0.07533702789682753
+        },
+        {
+          "fold_id": 2,
+          "mean_per_leg_pct": 0.0026082576554370914,
+          "annual_tc_pct": 0.012433030621748366,
+          "quarterly_tc_pct": 0.0031082576554370914,
+          "paper_3m_return": 0.1148936965433038,
+          "paper_alpha_vs_spy": 0.0778930699046926,
+          "net_3m_return": 0.1117854388878667,
+          "net_alpha_vs_spy": 0.0747848122492555
+        },
+        {
+          "fold_id": 3,
+          "mean_per_leg_pct": 0.0029377073076786346,
+          "annual_tc_pct": 0.013750829230714539,
+          "quarterly_tc_pct": 0.0034377073076786347,
+          "paper_3m_return": 0.0921261978531712,
+          "paper_alpha_vs_spy": 0.0550319412633588,
+          "net_3m_return": 0.08868849054549256,
+          "net_alpha_vs_spy": 0.05159423395568016
+        },
+        {
+          "fold_id": 4,
+          "mean_per_leg_pct": 0.0021557649947915995,
+          "annual_tc_pct": 0.010623059979166398,
+          "quarterly_tc_pct": 0.0026557649947915995,
+          "paper_3m_return": 0.1235024645885697,
+          "paper_alpha_vs_spy": 0.0864939686743801,
+          "net_3m_return": 0.1208466995937781,
+          "net_alpha_vs_spy": 0.0838382036795885
+        },
+        {
+          "fold_id": 5,
+          "mean_per_leg_pct": 0.0025844989054772754,
+          "annual_tc_pct": 0.012337995621909102,
+          "quarterly_tc_pct": 0.0030844989054772754,
+          "paper_3m_return": 0.1428061706176869,
+          "paper_alpha_vs_spy": 0.1057859348455746,
+          "net_3m_return": 0.13972167171220964,
+          "net_alpha_vs_spy": 0.10270143594009731
+        }
+      ]
+    },
+    {
+      "position_size_krw": 2000000,
+      "turnover_per_year": 4,
+      "mean_quarterly_tc_pct": 0.005649006031829308,
+      "mean_net_alpha_pct": 0.07507663972837515,
+      "std_net_alpha_pct": 0.016628263527702872,
+      "per_fold": [
+        {
+          "fold_id": 1,
+          "mean_per_leg_pct": 0.002586286216188669,
+          "annual_tc_pct": 0.02269028972950935,
+          "quarterly_tc_pct": 0.005672572432377338,
+          "paper_3m_return": 0.1155163240661485,
+          "paper_alpha_vs_spy": 0.0784233141130162,
+          "net_3m_return": 0.10984375163377116,
+          "net_alpha_vs_spy": 0.07275074168063886
+        },
+        {
+          "fold_id": 2,
+          "mean_per_leg_pct": 0.0026082576554370914,
+          "annual_tc_pct": 0.02286606124349673,
+          "quarterly_tc_pct": 0.0057165153108741824,
+          "paper_3m_return": 0.1148936965433038,
+          "paper_alpha_vs_spy": 0.0778930699046926,
+          "net_3m_return": 0.10917718123242962,
+          "net_alpha_vs_spy": 0.07217655459381841
+        },
+        {
+          "fold_id": 3,
+          "mean_per_leg_pct": 0.0029377073076786346,
+          "annual_tc_pct": 0.02550165846142908,
+          "quarterly_tc_pct": 0.00637541461535727,
+          "paper_3m_return": 0.0921261978531712,
+          "paper_alpha_vs_spy": 0.0550319412633588,
+          "net_3m_return": 0.08575078323781392,
+          "net_alpha_vs_spy": 0.04865652664800153
+        },
+        {
+          "fold_id": 4,
+          "mean_per_leg_pct": 0.0021557649947915995,
+          "annual_tc_pct": 0.019246119958332794,
+          "quarterly_tc_pct": 0.0048115299895831985,
+          "paper_3m_return": 0.1235024645885697,
+          "paper_alpha_vs_spy": 0.0864939686743801,
+          "net_3m_return": 0.1186909345989865,
+          "net_alpha_vs_spy": 0.0816824386847969
+        },
+        {
+          "fold_id": 5,
+          "mean_per_leg_pct": 0.0025844989054772754,
+          "annual_tc_pct": 0.0226759912438182,
+          "quarterly_tc_pct": 0.00566899781095455,
+          "paper_3m_return": 0.1428061706176869,
+          "paper_alpha_vs_spy": 0.1057859348455746,
+          "net_3m_return": 0.13713717280673235,
+          "net_alpha_vs_spy": 0.10011693703462005
+        }
+      ]
+    },
+    {
+      "position_size_krw": 2000000,
+      "turnover_per_year": 12,
+      "mean_quarterly_tc_pct": 0.015947018095487923,
+      "mean_net_alpha_pct": 0.06477862766471654,
+      "std_net_alpha_pct": 0.017235602082390136,
+      "per_fold": [
+        {
+          "fold_id": 1,
+          "mean_per_leg_pct": 0.002586286216188669,
+          "annual_tc_pct": 0.06407086918852806,
+          "quarterly_tc_pct": 0.016017717297132014,
+          "paper_3m_return": 0.1155163240661485,
+          "paper_alpha_vs_spy": 0.0784233141130162,
+          "net_3m_return": 0.09949860676901649,
+          "net_alpha_vs_spy": 0.06240559681588419
+        },
+        {
+          "fold_id": 2,
+          "mean_per_leg_pct": 0.0026082576554370914,
+          "annual_tc_pct": 0.0645981837304902,
+          "quarterly_tc_pct": 0.01614954593262255,
+          "paper_3m_return": 0.1148936965433038,
+          "paper_alpha_vs_spy": 0.0778930699046926,
+          "net_3m_return": 0.09874415061068124,
+          "net_alpha_vs_spy": 0.061743523972070044
+        },
+        {
+          "fold_id": 3,
+          "mean_per_leg_pct": 0.0029377073076786346,
+          "annual_tc_pct": 0.07250497538428724,
+          "quarterly_tc_pct": 0.01812624384607181,
+          "paper_3m_return": 0.0921261978531712,
+          "paper_alpha_vs_spy": 0.0550319412633588,
+          "net_3m_return": 0.07399995400709938,
+          "net_alpha_vs_spy": 0.03690569741728699
+        },
+        {
+          "fold_id": 4,
+          "mean_per_leg_pct": 0.0021557649947915995,
+          "annual_tc_pct": 0.05373835987499839,
+          "quarterly_tc_pct": 0.013434589968749598,
+          "paper_3m_return": 0.1235024645885697,
+          "paper_alpha_vs_spy": 0.0864939686743801,
+          "net_3m_return": 0.1100678746198201,
+          "net_alpha_vs_spy": 0.0730593787056305
+        },
+        {
+          "fold_id": 5,
+          "mean_per_leg_pct": 0.0025844989054772754,
+          "annual_tc_pct": 0.06402797373145461,
+          "quarterly_tc_pct": 0.016006993432863652,
+          "paper_3m_return": 0.1428061706176869,
+          "paper_alpha_vs_spy": 0.1057859348455746,
+          "net_3m_return": 0.12679917718482325,
+          "net_alpha_vs_spy": 0.08977894141271095
+        }
+      ]
+    },
+    {
+      "position_size_krw": 5000000,
+      "turnover_per_year": 2,
+      "mean_quarterly_tc_pct": 0.0034726133100734455,
+      "mean_net_alpha_pct": 0.07725303245013102,
+      "std_net_alpha_pct": 0.0165002322584668,
+      "per_fold": [
+        {
+          "fold_id": 1,
+          "mean_per_leg_pct": 0.0030100381017731186,
+          "annual_tc_pct": 0.014040152407092475,
+          "quarterly_tc_pct": 0.0035100381017731186,
+          "paper_3m_return": 0.1155163240661485,
+          "paper_alpha_vs_spy": 0.0784233141130162,
+          "net_3m_return": 0.11200628596437538,
+          "net_alpha_vs_spy": 0.07491327601124308
+        },
+        {
+          "fold_id": 2,
+          "mean_per_leg_pct": 0.00303985793265205,
+          "annual_tc_pct": 0.0141594317306082,
+          "quarterly_tc_pct": 0.00353985793265205,
+          "paper_3m_return": 0.1148936965433038,
+          "paper_alpha_vs_spy": 0.0778930699046926,
+          "net_3m_return": 0.11135383861065175,
+          "net_alpha_vs_spy": 0.07435321197204055
+        },
+        {
+          "fold_id": 3,
+          "mean_per_leg_pct": 0.0033798272600755693,
+          "annual_tc_pct": 0.015519309040302277,
+          "quarterly_tc_pct": 0.0038798272600755693,
+          "paper_3m_return": 0.0921261978531712,
+          "paper_alpha_vs_spy": 0.0550319412633588,
+          "net_3m_return": 0.08824637059309562,
+          "net_alpha_vs_spy": 0.05115211400328323
+        },
+        {
+          "fold_id": 4,
+          "mean_per_leg_pct": 0.002425730907934037,
+          "annual_tc_pct": 0.011702923631736148,
+          "quarterly_tc_pct": 0.002925730907934037,
+          "paper_3m_return": 0.1235024645885697,
+          "paper_alpha_vs_spy": 0.0864939686743801,
+          "net_3m_return": 0.12057673368063566,
+          "net_alpha_vs_spy": 0.08356823776644606
+        },
+        {
+          "fold_id": 5,
+          "mean_per_leg_pct": 0.003007612347932451,
+          "annual_tc_pct": 0.014030449391729804,
+          "quarterly_tc_pct": 0.003507612347932451,
+          "paper_3m_return": 0.1428061706176869,
+          "paper_alpha_vs_spy": 0.1057859348455746,
+          "net_3m_return": 0.13929855826975446,
+          "net_alpha_vs_spy": 0.10227832249764214
+        }
+      ]
+    },
+    {
+      "position_size_krw": 5000000,
+      "turnover_per_year": 4,
+      "mean_quarterly_tc_pct": 0.0064452266201468905,
+      "mean_net_alpha_pct": 0.07428041914005756,
+      "std_net_alpha_pct": 0.016665763959005618,
+      "per_fold": [
+        {
+          "fold_id": 1,
+          "mean_per_leg_pct": 0.0030100381017731186,
+          "annual_tc_pct": 0.026080304814184947,
+          "quarterly_tc_pct": 0.006520076203546237,
+          "paper_3m_return": 0.1155163240661485,
+          "paper_alpha_vs_spy": 0.0784233141130162,
+          "net_3m_return": 0.10899624786260227,
+          "net_alpha_vs_spy": 0.07190323790946997
+        },
+        {
+          "fold_id": 2,
+          "mean_per_leg_pct": 0.00303985793265205,
+          "annual_tc_pct": 0.026318863461216403,
+          "quarterly_tc_pct": 0.006579715865304101,
+          "paper_3m_return": 0.1148936965433038,
+          "paper_alpha_vs_spy": 0.0778930699046926,
+          "net_3m_return": 0.10831398067799969,
+          "net_alpha_vs_spy": 0.07131335403938849
+        },
+        {
+          "fold_id": 3,
+          "mean_per_leg_pct": 0.0033798272600755693,
+          "annual_tc_pct": 0.029038618080604553,
+          "quarterly_tc_pct": 0.007259654520151138,
+          "paper_3m_return": 0.0921261978531712,
+          "paper_alpha_vs_spy": 0.0550319412633588,
+          "net_3m_return": 0.08486654333302006,
+          "net_alpha_vs_spy": 0.04777228674320766
+        },
+        {
+          "fold_id": 4,
+          "mean_per_leg_pct": 0.002425730907934037,
+          "annual_tc_pct": 0.021405847263472298,
+          "quarterly_tc_pct": 0.0053514618158680746,
+          "paper_3m_return": 0.1235024645885697,
+          "paper_alpha_vs_spy": 0.0864939686743801,
+          "net_3m_return": 0.11815100277270163,
+          "net_alpha_vs_spy": 0.08114250685851203
+        },
+        {
+          "fold_id": 5,
+          "mean_per_leg_pct": 0.003007612347932451,
+          "annual_tc_pct": 0.02606089878345961,
+          "quarterly_tc_pct": 0.006515224695864902,
+          "paper_3m_return": 0.1428061706176869,
+          "paper_alpha_vs_spy": 0.1057859348455746,
+          "net_3m_return": 0.136290945921822,
+          "net_alpha_vs_spy": 0.09927071014970969
+        }
+      ]
+    },
+    {
+      "position_size_krw": 5000000,
+      "turnover_per_year": 12,
+      "mean_quarterly_tc_pct": 0.018335679860440674,
+      "mean_net_alpha_pct": 0.06238996589976379,
+      "std_net_alpha_pct": 0.017366519143232062,
+      "per_fold": [
+        {
+          "fold_id": 1,
+          "mean_per_leg_pct": 0.0030100381017731186,
+          "annual_tc_pct": 0.07424091444255485,
+          "quarterly_tc_pct": 0.01856022861063871,
+          "paper_3m_return": 0.1155163240661485,
+          "paper_alpha_vs_spy": 0.0784233141130162,
+          "net_3m_return": 0.09695609545550979,
+          "net_alpha_vs_spy": 0.05986308550237749
+        },
+        {
+          "fold_id": 2,
+          "mean_per_leg_pct": 0.00303985793265205,
+          "annual_tc_pct": 0.07495659038364921,
+          "quarterly_tc_pct": 0.018739147595912303,
+          "paper_3m_return": 0.1148936965433038,
+          "paper_alpha_vs_spy": 0.0778930699046926,
+          "net_3m_return": 0.09615454894739149,
+          "net_alpha_vs_spy": 0.05915392230878029
+        },
+        {
+          "fold_id": 3,
+          "mean_per_leg_pct": 0.0033798272600755693,
+          "annual_tc_pct": 0.08311585424181367,
+          "quarterly_tc_pct": 0.020778963560453417,
+          "paper_3m_return": 0.0921261978531712,
+          "paper_alpha_vs_spy": 0.0550319412633588,
+          "net_3m_return": 0.07134723429271778,
+          "net_alpha_vs_spy": 0.034252977702905384
+        },
+        {
+          "fold_id": 4,
+          "mean_per_leg_pct": 0.002425730907934037,
+          "annual_tc_pct": 0.06021754179041689,
+          "quarterly_tc_pct": 0.015054385447604223,
+          "paper_3m_return": 0.1235024645885697,
+          "paper_alpha_vs_spy": 0.0864939686743801,
+          "net_3m_return": 0.10844807914096548,
+          "net_alpha_vs_spy": 0.07143958322677588
+        },
+        {
+          "fold_id": 5,
+          "mean_per_leg_pct": 0.003007612347932451,
+          "annual_tc_pct": 0.07418269635037883,
+          "quarterly_tc_pct": 0.018545674087594707,
+          "paper_3m_return": 0.1428061706176869,
+          "paper_alpha_vs_spy": 0.1057859348455746,
+          "net_3m_return": 0.1242604965300922,
+          "net_alpha_vs_spy": 0.08724026075797989
+        }
+      ]
+    }
+  ]
+}
