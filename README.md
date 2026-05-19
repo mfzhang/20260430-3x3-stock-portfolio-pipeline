@@ -25,7 +25,7 @@ Headline hyperparameters (Trial #58, frozen since v2.3.7's Optuna study): `mediu
 
 - v2.3.11 added a [transaction cost analysis](#stage-1--transaction-cost-analysis-v2311) calibrated to the Korean broker route (Korea Investment & Securities). Main scenario (₩1M position × quarterly rebalance) yields +7.55%p net alpha after frictions.
 - v2.3.12 refactored the NN to a [heteroscedastic dual-head architecture](#v2312--heteroscedastic-nn-with-log-volatility-target) trained with Gaussian NLL on log-transformed volatility. Risk over-prediction resolved; this is the current production system.
-- **v2.3.13 is an in-progress pre-registered comparison study** testing whether β-NLL (Seitzer et al. 2022) outperforms standard NLL on calibration metrics. The full β-NLL retrain (~5h at N=20) is running at the time of writing; the v2.3.12 production result above is the baseline. Pre-registration, smoke study results (effective N=1 Run 1 and N=3 Run 2), and the acceptance/rejection decision rule were all committed to GitHub before the production β-NLL training began. See `pre_registration_v2313_betanll_study.md` and commits `cdcb2f1`, `653688c`, `8d6a7c7`, `aeac1e0`.
+- **v2.3.13 tested whether β-NLL (Seitzer et al. 2022) outperforms standard NLL** on calibration metrics in a pre-registered comparison study. **Result: null on the primary metric** — β-NLL rank_corr 0.4883 vs standard NLL 0.502 (Δ −0.014), failing the pre-registered acceptance threshold of ≥ 0.51. v2.3.12 (standard NLL) remains production by pre-registered parsimony. Pre-registration, smoke study results, and the mechanical decision are all committed to GitHub (`cdcb2f1`, `653688c`, `8d6a7c7`, `aeac1e0`, `93b16e8`). See [v2.3.13 study section](#v2313--β-nll-comparison-study-null-result-standard-nll-retained) below.
 
 ## What the pipeline does
 
@@ -114,7 +114,7 @@ fix_spy_benchmark.py            SPY 3-month forward benchmark for stratified K-f
 transaction_cost_analysis.py    Korean broker route TC sensitivity grid (v2.3.11)
 merge_v2310_cache.py            One-off cache merge utility for v2.3.10 feature integration
 
-# v2.3.13 β-NLL comparison study (in-progress)
+# v2.3.13 β-NLL comparison study (null result; standard NLL retained)
 pre_registration_v2313_betanll_study.md  Pre-registration + 3 amendments (committed before runs)
 smoke_v2313_betanll_comparison.py        Pre-launch smoke study (standard NLL vs β-NLL)
 
@@ -411,9 +411,9 @@ The broken intermediate v2.3.8 production had universe NN risk mean of 86.2% wit
 
 ### Production retrain protocol
 
-The Optuna best config (Trial #58: medium arch, lr=2.5e-4, wd=1.64e-4) is retrained at `N_ENSEMBLE=20` with the v2.3.12 architecture. The standard NLL retrain completed (results in the [Latest results](#latest-results-v2312) table above). Calibration diagnostics on Fold 2 then revealed the small-sigma compression and large-sigma underlearning pathology documented in Seitzer et al. (2022). Rather than activating β-NLL ad hoc, this triggered a separate pre-registered comparison study — see [v2.3.13 — β-NLL comparison study](#v2313--β-nll-comparison-study-in-progress) below.
+The Optuna best config (Trial #58: medium arch, lr=2.5e-4, wd=1.64e-4) is retrained at `N_ENSEMBLE=20` with the v2.3.12 architecture. The standard NLL retrain completed (results in the [Latest results](#latest-results-v2312) table above). Calibration diagnostics on Fold 2 then revealed the small-sigma compression and large-sigma underlearning pathology documented in Seitzer et al. (2022). Rather than activating β-NLL ad hoc, this triggered a separate pre-registered comparison study — see [v2.3.13 — β-NLL comparison study](#v2313--β-nll-comparison-study-null-result-standard-nll-retained) below.
 
-## v2.3.13 — β-NLL comparison study (in-progress)
+## v2.3.13 — β-NLL comparison study (null result; standard NLL retained)
 
 ### Motivation
 
@@ -426,7 +426,7 @@ v2.3.12's standard NLL production retrain (5-fold, N=20) produced deployable ris
 
 This matches a textbook failure mode of standard Gaussian NLL documented in Seitzer et al. (2022, "On the Pitfalls of Heteroscedastic Uncertainty Estimation with Probabilistic Neural Networks"). The paper proposes β-NLL — a reweighted NLL that scales each sample's loss by σ^(2β), with β=0.5 recovering something close to MSE-on-residuals behavior while keeping the variance prediction trainable.
 
-Whether β-NLL meaningfully improves calibration on this dataset is an empirical question. v2.3.13 is the pre-registered study testing it.
+Whether β-NLL meaningfully improves calibration on this dataset was tested in a pre-registered comparison study. **The result was a null on rank correlation: β-NLL underperformed standard NLL on the primary metric (rank_corr 0.4883 vs 0.502, Δ = −0.014). v2.3.12 standard NLL remains production.**
 
 ### Pre-registration timeline
 
@@ -442,6 +442,7 @@ The full design — including decision criteria, smoke study protocol, and accep
 | `3662aa0` | Evidence preservation: smoke script and Run 1 archive force-added under gitignore exception |
 | `aeac1e0` | Amendment 3: launch confirmed + 3 observations recorded ex ante (variance, tertile flip, sigma narrowing) |
 | `212488b` | Run 2 evidence: `smoke_v2313_results.json` force-added alongside Phase 1 docs update |
+| `93b16e8` | Amendment 4: production retrain result + mechanical reject decision per Amendment 3 rule |
 
 Every code change is preceded by a documentation commit explaining what changed and why. The full pre-registration document with all amendments lives in `pre_registration_v2313_betanll_study.md` in this repo.
 
@@ -470,7 +471,7 @@ Decision: **launch full β-NLL production retrain** per pre-registered rule. Cri
 
 ### Pre-registered observations (Amendment 3)
 
-Three observations from Run 2 are recorded ex ante (before the production β-NLL retrain begins) to prevent narrative construction after the result is known:
+Three observations from Run 2 were recorded ex ante (before the production β-NLL retrain began) to prevent narrative construction after the result was known:
 
 1. **β-NLL has 2.3× higher rank_corr variance** (0.0255 vs 0.0109). May improve with N=20 ensemble averaging in production, or may persist.
 2. **Tertile-gap sign flips**: standard NLL underlearns large-σ tickers (+0.245), β-NLL underlearns small-σ tickers (−0.224). The pathology shifts rather than disappears. This matches Seitzer 2022 Figure 2c-d.
@@ -478,16 +479,44 @@ Three observations from Run 2 are recorded ex ante (before the production β-NLL
 
 ### Acceptance rule (Amendment 3 restated)
 
-β-NLL is adopted as v2.3.13 production **if and only if** the production N=20 retrain achieves both:
+β-NLL would be adopted as v2.3.13 production **if and only if** the production N=20 retrain achieved both:
 
 - rank_corr ≥ 0.51 (within 0.01 of v2.3.12's 0.502 baseline), AND
 - |tertile_gap| < 0.245 (strictly better than v2.3.12 standard NLL)
 
-If either criterion fails, v2.3.12 (standard NLL) remains production by parsimony. Tied results favor keeping the simpler standard NLL.
+If either criterion failed, v2.3.12 (standard NLL) would remain production by parsimony. Tied results favored keeping the simpler standard NLL.
 
-### Status
+### Production result (Amendment 4)
 
-The production β-NLL retrain (5-fold × N=20, ~4-5 hours) writes to `results/stage2_betaNLL/top1_trial58/`, leaving v2.3.12 production output at `results/stage2/top1_trial58/` byte-identical. The v2.3.13 final decision (adopt vs reject) will appear in a subsequent commit once the retrain completes and metrics are evaluated against the acceptance rule above.
+The full β-NLL production retrain (5-fold × N=20, output to `results/stage2_betaNLL/top1_trial58/`) completed on 2026-05-19.
+
+| Metric | v2.3.12 standard NLL | v2.3.13 β-NLL | Δ |
+|---|---|---|---|
+| rank_corr_mean (5-fold) | +0.502 | **+0.4883** | **−0.014** |
+| selection_alpha_mean | +7.61%p | +6.46%p | −1.15%p |
+| Fold 1 rank_corr | (~0.32) | +0.295 | (similar) |
+| Fold 2 rank_corr | (~0.62) | +0.613 | (similar) |
+| Wall-clock | 4.15h | 0.50h | (β-NLL ~8× faster) |
+
+Mechanical decision per Amendment 3 acceptance rule:
+- Criterion (a) rank_corr ≥ 0.51: **FAIL** (0.4883, gap −0.0217)
+- Criterion (b) |tertile_gap| < 0.245: not evaluated (a failed; full null path)
+- **Outcome: keep v2.3.12 standard NLL as production**
+
+No discretion applied. β-NLL underperformed on the primary metric (rank correlation) and was excluded from adoption before its calibration benefit could even gate the secondary criterion.
+
+### Why β-NLL converged so fast
+
+The 8× faster wall-clock (0.50h vs 4.15h, same architecture and Trial #58 hyperparameters) is consistent with Seitzer β-NLL's σ^(2β) sample weighting downweighting easy samples and shortening the useful learning window. Per-NN best epochs landed at ~10-50 (vs ~100-1000 typical for standard NLL at the same patience setting), with patience-41 firing aggressively. This is algorithmic behavior, not a bug — the model finds a local plateau faster but at a worse final position.
+
+### What this study established
+
+- **β-NLL is not a free improvement on this dataset.** On the primary ranking metric it is strictly worse than standard NLL.
+- **The pathology Seitzer et al. (2022) describe is real but does not have an easy fix here.** Both losses miscalibrate; they miscalibrate differently. Whether β-NLL's failure mode is preferable for some downstream use is an open question — but on the deployment-relevant ranking metric, standard NLL wins.
+- **The pre-registration + amendment workflow held up.** Amendment 4's decision was mechanical from data, not narrative.
+
+A minor cosmetic banner bug was noted during retrain (banner printed "Loss = Gaussian NLL" while β-NLL was active; verified by output redirect and prefix line). Output and metrics are unaffected. Queued for v2.3.14+ cleanup.
+
 
 ## Known limitations
 
@@ -553,7 +582,7 @@ Planned upgrades:
 - **Composite-score coefficient optimization**: grid search over `sentiment_weight`, `uncertainty_penalty`, `event_risk_penalty`, `EVENT_RISK_PENALTY`. The Optuna Stage 1 search intentionally excluded these to keep the NN training search space focused. Stage 1's discovery that the network converges in 200-400 epochs at the optimal hyperparameters means a follow-up Stage 3 study is feasible at production ensemble size (N=20) within ~24h.
 - **Survivorship bias correction**: use point-in-time S&P 500 + NASDAQ-100 composition data (Compustat / CRSP / Bloomberg) instead of current composition. Currently the training universe overrepresents survivors, which biases the model's expectations.
 - ~~**Transaction cost + slippage modeling**~~ — implemented in v2.3.11 (see [Stage 1 — Transaction cost analysis](#stage-1--transaction-cost-analysis-v2311)). Korean broker (KIS) calibration with cube-root market impact; main scenario (₩1M × quarterly turnover) yields +7.55%p net alpha. Still future work: live tracking of realized slippage against the model's per-trade prediction to refine the impact constant.
-- **Uncertainty calibration**: verify that predicted standard deviations actually match realized errors (calibration plots, temperature scaling if needed, following Guo et al., 2017). At N=20 with 1 MC pass per model, the dropout-based aleatoric component is weak; characterizing whether ensemble variance alone is well-calibrated would inform whether to revisit MC dropout count. Partial work: v2.3.13 is a pre-registered comparison of standard Gaussian NLL vs β-NLL (Seitzer et al., 2022) to address the small-sigma compression / large-sigma underlearning pathology observed in v2.3.12's Fold 2 diagnostics — see [v2.3.13 — β-NLL comparison study](#v2313--β-nll-comparison-study-in-progress).
+- **Uncertainty calibration**: verify that predicted standard deviations actually match realized errors (calibration plots, temperature scaling if needed, following Guo et al., 2017). At N=20 with 1 MC pass per model, the dropout-based aleatoric component is weak; characterizing whether ensemble variance alone is well-calibrated would inform whether to revisit MC dropout count. Partial work: v2.3.13 was a pre-registered comparison of standard Gaussian NLL vs β-NLL (Seitzer et al., 2022) addressing the small-sigma compression / large-sigma underlearning pathology observed in v2.3.12's Fold 2 diagnostics. β-NLL underperformed on the primary ranking metric (rank_corr 0.4883 vs 0.502) and was rejected per pre-registered rule. The calibration pathology persists; resolving it remains open. See [v2.3.13 — β-NLL comparison study](#v2313--β-nll-comparison-study-null-result-standard-nll-retained).
 - ~~**Heteroscedastic output + aleatoric / epistemic decomposition**~~ — implemented in v2.3.12 (see [v2.3.12 — Heteroscedastic NN with log-volatility target](#v2312--heteroscedastic-nn-with-log-volatility-target)). Standard Gaussian NLL with log-transformed volatility target; aleatoric (per-sample log-sigma) and epistemic (ensemble variance) propagated separately. Production retrain in progress at N=20 with calibration-plot review before acceptance.
 - **Hierarchical Bayesian structure over sectors**: sector-level priors with ticker-level posteriors (analogous to multi-level GLM with ROI-level random effects in fMRI analysis). Expected to improve cross-sector transfer, which is currently weak (+0.027 rank corr in the v2.3.3 ablation; not re-measured at Stage 2).
 - **Disentangle macro from the per-ticker feature matrix.** The v2.3.3 ablation showed that macro features hurt cross-sectional rank correlation (+0.465 → +0.526 when removed), because all tickers at a given snapshot share identical macro values — the ensemble partially overfits to time-synchronous signals that carry no inter-ticker information. A cleaner design would route macro features through the blend-optimizer's regime gate only, rather than concatenating them into each ticker's feature vector.
