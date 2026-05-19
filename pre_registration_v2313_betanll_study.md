@@ -66,3 +66,59 @@ Only the loss function is being varied.
 - Seitzer et al. (2022) "On the Pitfalls of Heteroscedastic Uncertainty Estimation with Probabilistic Neural Networks." ICLR.
 - Lakshminarayanan et al. (2017) "Simple and Scalable Predictive Uncertainty Estimation using Deep Ensembles." NeurIPS. (precedent for head-to-head comparison study design)
 
+
+---
+
+## Amendment 1 (2026-05-19): Pre-launch smoke comparison design
+
+Before launching the full β-NLL production retrain (5-fold, N=20), a smoke
+comparison is run to validate that β-NLL is numerically stable and produces
+qualitatively different calibration behavior than standard NLL. This amendment
+is committed BEFORE the smoke runs to prevent post-hoc design changes.
+
+### Design
+
+Variable: loss function ∈ {standard NLL, β-NLL with β=0.5}
+Other variables (FIXED): Fold 2 only, N_ENSEMBLE=1, all hyperparameters from
+Trial #58, TRAINING_EPOCHS=2000, patience=41.
+Seeds: numpy/torch seed ∈ {42, 43, 44} for each loss = 6 total runs.
+
+### Pre-specified metrics (Fold 2 test set)
+
+For each (loss, seed) combination, compute:
+1. Mean test rank_corr
+2. Best val_NLL achieved
+3. log-sigma range (max - min over test set)
+4. z-score std = std((log_actual - log_pred_mean) / log_pred_sigma)
+5. Sigma tertile |z| gap = |z|_large_third - |z|_small_third
+
+### Smoke decision rule
+
+Aggregate over 3 seeds per loss. Compute mean ± std per metric per loss.
+
+Launch full β-NLL production retrain if AND ONLY IF:
+
+(a) No NaN, no divergence in any of 3 β-NLL runs.
+(b) Mean β-NLL rank_corr (smoke) ≥ Mean standard NLL rank_corr (smoke) - 0.05.
+    Threshold is loose because N=1 smoke is noisy; this prevents launching only
+    if β-NLL is catastrophically worse for ranking.
+(c) β-NLL z-score std (smoke mean) shows differentiation from standard NLL,
+    i.e. |β-NLL z-std - standard z-std| > 0.1 in either direction.
+    Rationale: if smoke z-std are identical, β-NLL is not behaving differently
+    in any measurable way, and the production retrain would just reproduce
+    standard NLL results. Better to abort and save 5 hours.
+
+If any of (a), (b), (c) fails, the production retrain is NOT launched, and
+this amendment + smoke results are committed as a null-result finding.
+
+If all three pass, the production retrain is launched.
+
+### Why N=3 seeds and not N=1 or N=5
+
+N=1 gives no variance estimate — cannot tell if a single-seed difference is
+signal or noise.
+N=3 is the minimum for any variance estimate (~30 min total smoke time).
+N=5+ would be ideal for formal hypothesis testing but is reserved for the
+production retrain itself (N_ENSEMBLE=20 there provides better variance
+characterization across folds).
+
