@@ -411,12 +411,83 @@ The broken intermediate v2.3.8 production had universe NN risk mean of 86.2% wit
 
 ### Production retrain protocol
 
-The Optuna best config (Trial #58: medium arch, lr=2.5e-4, wd=1.64e-4) is retrained at `N_ENSEMBLE=20` with the v2.3.12 architecture. Decision flow:
+The Optuna best config (Trial #58: medium arch, lr=2.5e-4, wd=1.64e-4) is retrained at `N_ENSEMBLE=20` with the v2.3.12 architecture. The standard NLL retrain completed (results in the [Latest results](#latest-results-v2312) table above). Calibration diagnostics on Fold 2 then revealed the small-sigma compression and large-sigma underlearning pathology documented in Seitzer et al. (2022). Rather than activating β-NLL ad hoc, this triggered a separate pre-registered comparison study — see [v2.3.13 — β-NLL comparison study](#v2313--β-nll-comparison-study-in-progress) below.
 
-- **Standard NLL (default)** is used for the first retrain.
-- A calibration plot (predicted log-sigma vs. realized log-residual) is checked before accepting the result.
-- If the plot shows small-sigma compression and large-sigma underlearning (a known pathology of standard NLL — Seitzer et al., 2022), the beta-NLL backup loss is activated and the model is retrained once.
-- Otherwise the standard NLL result is final.
+## v2.3.13 — β-NLL comparison study (in-progress)
+
+### Motivation
+
+v2.3.12's standard NLL production retrain (5-fold, N=20) produced deployable risk numbers at the universe level but showed calibration pathology on Fold 2 diagnostics:
+
+- Universe-level z-score std = 0.216 (ideal ~1.0)
+- Coverage within ±1σ = 100% (ideal ~68%)
+- Sigma tertile |z| ranking: 0.25 (small σ) / 0.27 (med) / 0.49 (large σ) — large-sigma tickers systematically underlearned
+- Predicted log-σ range narrow: [0.309, 0.583] — limited heteroscedastic spread
+
+This matches a textbook failure mode of standard Gaussian NLL documented in Seitzer et al. (2022, "On the Pitfalls of Heteroscedastic Uncertainty Estimation with Probabilistic Neural Networks"). The paper proposes β-NLL — a reweighted NLL that scales each sample's loss by σ^(2β), with β=0.5 recovering something close to MSE-on-residuals behavior while keeping the variance prediction trainable.
+
+Whether β-NLL meaningfully improves calibration on this dataset is an empirical question. v2.3.13 is the pre-registered study testing it.
+
+### Pre-registration timeline
+
+The full design — including decision criteria, smoke study protocol, and acceptance/rejection thresholds — was committed to GitHub before any β-NLL training was run:
+
+| Commit | Content |
+|---|---|
+| `cdcb2f1` | Pre-registration initial: study design, decision rule (a/b/c), v2.3.12 baseline metrics |
+| `653688c` | Amendment 1: smoke comparison protocol (Fold 2, N=1 ensemble, 3 seeds × 2 losses, criterion (c) threshold = 0.10) |
+| `6271f59` | Code patch: `--beta-nll` flag in `stage2_retrain.py` (additive, default behavior unchanged) |
+| `8d6a7c7` | Amendment 2: seed override patch required (after smoke Run 1 revealed effective N=1 due to internal seed re-injection at line 400-401) |
+| `6a31f03` | Code patch: `seed_override` parameter in `run_fold_with_plot` (byte-identical to v2.3.12 when default `None`) |
+| `3662aa0` | Evidence preservation: smoke script and Run 1 archive force-added under gitignore exception |
+| `aeac1e0` | Amendment 3: launch confirmed + 3 observations recorded ex ante (variance, tertile flip, sigma narrowing) |
+| `212488b` | Run 2 evidence: `smoke_v2313_results.json` force-added alongside Phase 1 docs update |
+
+Every code change is preceded by a documentation commit explaining what changed and why. The full pre-registration document with all amendments lives in `pre_registration_v2313_betanll_study.md` in this repo.
+
+### Smoke study
+
+Per Amendment 1, the smoke study compared standard NLL vs β-NLL on Fold 2 of the 5-fold stratified K-fold with N=1 ensemble member per seed, 3 seeds per loss, 2000-epoch budget with patience-41 early stopping.
+
+**Run 1** (`smoke_v2313_results_run1_seedfail.json`) revealed that `stage2_retrain.py` line 400-401 re-seeds inside the NN training loop using a deterministic formula (`SEED + fold_id * 100 + nn_idx`), overriding caller seeds. Effective N was 1 instead of 3. Amendment 2 added the `seed_override` parameter to fix this without changing production behavior.
+
+**Run 2** (`smoke_v2313_results.json`) with real N=3 seeds produced these Fold 2 aggregate metrics:
+
+| Metric | Standard NLL | β-NLL |
+|---|---|---|
+| rank_corr | +0.6055 ± 0.0109 | +0.5840 ± 0.0255 |
+| z-score std | 0.211 ± 0.008 | 0.315 ± 0.060 |
+| Sigma tertile gap | +0.245 (large-σ underlearning) | −0.224 (small-σ underlearning) |
+| log-σ range | 0.290 | 0.099 |
+
+Three pre-registered launch criteria were evaluated:
+
+- (a) No NaN in β-NLL runs: **True**
+- (b) β-NLL rank_corr ≥ Standard − 0.05: **True** (Δ = −0.0215)
+- (c) |β-NLL z_std − Standard z_std| > 0.10: **True** (Δ = +0.104, marginal)
+
+Decision: **launch full β-NLL production retrain** per pre-registered rule. Criterion (c) passed by only +0.004 above the threshold — the production result could plausibly flip either direction on natural variance.
+
+### Pre-registered observations (Amendment 3)
+
+Three observations from Run 2 are recorded ex ante (before the production β-NLL retrain begins) to prevent narrative construction after the result is known:
+
+1. **β-NLL has 2.3× higher rank_corr variance** (0.0255 vs 0.0109). May improve with N=20 ensemble averaging in production, or may persist.
+2. **Tertile-gap sign flips**: standard NLL underlearns large-σ tickers (+0.245), β-NLL underlearns small-σ tickers (−0.224). The pathology shifts rather than disappears. This matches Seitzer 2022 Figure 2c-d.
+3. **β-NLL log-σ range narrows** (0.290 → 0.099). Counter to the naive expectation that β-NLL should produce more spread; the σ^(2β=1) weighting actually incentivizes more uniform sigmas across samples.
+
+### Acceptance rule (Amendment 3 restated)
+
+β-NLL is adopted as v2.3.13 production **if and only if** the production N=20 retrain achieves both:
+
+- rank_corr ≥ 0.51 (within 0.01 of v2.3.12's 0.502 baseline), AND
+- |tertile_gap| < 0.245 (strictly better than v2.3.12 standard NLL)
+
+If either criterion fails, v2.3.12 (standard NLL) remains production by parsimony. Tied results favor keeping the simpler standard NLL.
+
+### Status
+
+The production β-NLL retrain (5-fold × N=20, ~4-5 hours) writes to `results/stage2_betaNLL/top1_trial58/`, leaving v2.3.12 production output at `results/stage2/top1_trial58/` byte-identical. The v2.3.13 final decision (adopt vs reject) will appear in a subsequent commit once the retrain completes and metrics are evaluated against the acceptance rule above.
 
 ## Known limitations
 
@@ -482,7 +553,7 @@ Planned upgrades:
 - **Composite-score coefficient optimization**: grid search over `sentiment_weight`, `uncertainty_penalty`, `event_risk_penalty`, `EVENT_RISK_PENALTY`. The Optuna Stage 1 search intentionally excluded these to keep the NN training search space focused. Stage 1's discovery that the network converges in 200-400 epochs at the optimal hyperparameters means a follow-up Stage 3 study is feasible at production ensemble size (N=20) within ~24h.
 - **Survivorship bias correction**: use point-in-time S&P 500 + NASDAQ-100 composition data (Compustat / CRSP / Bloomberg) instead of current composition. Currently the training universe overrepresents survivors, which biases the model's expectations.
 - ~~**Transaction cost + slippage modeling**~~ — implemented in v2.3.11 (see [Stage 1 — Transaction cost analysis](#stage-1--transaction-cost-analysis-v2311)). Korean broker (KIS) calibration with cube-root market impact; main scenario (₩1M × quarterly turnover) yields +7.55%p net alpha. Still future work: live tracking of realized slippage against the model's per-trade prediction to refine the impact constant.
-- **Uncertainty calibration**: verify that predicted standard deviations actually match realized errors (calibration plots, temperature scaling if needed, following Guo et al., 2017). At N=20 with 1 MC pass per model, the dropout-based aleatoric component is weak; characterizing whether ensemble variance alone is well-calibrated would inform whether to revisit MC dropout count.
+- **Uncertainty calibration**: verify that predicted standard deviations actually match realized errors (calibration plots, temperature scaling if needed, following Guo et al., 2017). At N=20 with 1 MC pass per model, the dropout-based aleatoric component is weak; characterizing whether ensemble variance alone is well-calibrated would inform whether to revisit MC dropout count. Partial work: v2.3.13 is a pre-registered comparison of standard Gaussian NLL vs β-NLL (Seitzer et al., 2022) to address the small-sigma compression / large-sigma underlearning pathology observed in v2.3.12's Fold 2 diagnostics — see [v2.3.13 — β-NLL comparison study](#v2313--β-nll-comparison-study-in-progress).
 - ~~**Heteroscedastic output + aleatoric / epistemic decomposition**~~ — implemented in v2.3.12 (see [v2.3.12 — Heteroscedastic NN with log-volatility target](#v2312--heteroscedastic-nn-with-log-volatility-target)). Standard Gaussian NLL with log-transformed volatility target; aleatoric (per-sample log-sigma) and epistemic (ensemble variance) propagated separately. Production retrain in progress at N=20 with calibration-plot review before acceptance.
 - **Hierarchical Bayesian structure over sectors**: sector-level priors with ticker-level posteriors (analogous to multi-level GLM with ROI-level random effects in fMRI analysis). Expected to improve cross-sector transfer, which is currently weak (+0.027 rank corr in the v2.3.3 ablation; not re-measured at Stage 2).
 - **Disentangle macro from the per-ticker feature matrix.** The v2.3.3 ablation showed that macro features hurt cross-sectional rank correlation (+0.465 → +0.526 when removed), because all tickers at a given snapshot share identical macro values — the ensemble partially overfits to time-synchronous signals that carry no inter-ticker information. A cleaner design would route macro features through the blend-optimizer's regime gate only, rather than concatenating them into each ticker's feature vector.
