@@ -221,3 +221,80 @@ Any future reviewer can verify: Amendment 2 acknowledges Run 1's
 specific result and pre-commits to a Run 2 with corrected methodology
 under unchanged decision thresholds.
 
+
+---
+
+## Amendment 3 (2026-05-19, post-smoke-run-2): launch confirmed, observations recorded
+
+### Smoke Run 2 result (with seed override patch from commit 6a31f03)
+
+3 standard seeds produced 3 genuinely distinct results (verifying patch works):
+- val_NLL: -2.297077, -2.279596, -2.301781 (vs Run 1 single value -2.299058)
+- All 6 runs converged, no NaN
+
+### Aggregated metrics (N=3 per loss)
+
+|                | standard           | beta_nll           |
+|----------------|--------------------|--------------------|
+| rank_corr      | 0.605 ± 0.011      | 0.584 ± 0.026      |
+| z_std          | 0.211 ± 0.008      | 0.315 ± 0.060      |
+| tertile_gap    | +0.245             | -0.224             |
+| log_sigma_range| 0.290              | 0.099              |
+| |z|<1 coverage | 100.0%             | 98.7%              |
+
+### Pre-registered launch decision
+
+- (a) No NaN: True (3/3 β-NLL runs valid)
+- (b) Δ rank_corr = -0.0215 ≥ -0.05: True
+- (c) |Δ z_std| = 0.104 > 0.10: True (marginal, +0.004 above threshold)
+- **LAUNCH FULL β-NLL RETRAIN: True**
+
+### Three additional observations (recorded BEFORE production retrain)
+
+These are NOT decision criteria — they are observations to interpret the
+production retrain result. Recording them ex ante prevents post-hoc
+narrative construction.
+
+**Observation 1: β-NLL has higher rank_corr variance**
+Standard std=0.011, β-NLL std=0.026 (~2.3x larger). β-NLL trades ranking
+stability for calibration. May be partially mitigated by N=20 ensemble
+averaging in production.
+
+**Observation 2: tertile_gap sign flip**
+Standard: +0.245 (large-sigma underlearning — model "over-warns")
+β-NLL:    -0.224 (small-sigma underlearning — model "under-warns")
+β-NLL did not eliminate pathology; it shifted it to the opposite direction.
+This is consistent with Seitzer et al. (2022) Figure 2c-d, which shows
+β-NLL trades one pathology mode for another.
+
+**Observation 3: β-NLL log_sigma_range NARROWS**
+Standard: 0.290 (greater between-ticker uncertainty discrimination)
+β-NLL:    0.099 (uniform sigma assignment, less discrimination)
+Counter to the naive expectation that β-NLL improves discrimination.
+Mechanism: β-NLL down-weights samples with small predicted sigma during
+training, which incentivizes the model to set most sigmas to similar
+moderate values rather than risk small-sigma misprediction.
+
+### Implication for production retrain
+
+The β-NLL production result (5-fold, N=20, ~5 hours) is expected to show:
+- rank_corr near 0.50 (similar to or slightly below v2.3.12 standard production 0.502)
+- z_std mean ~0.30 (improved vs standard's 0.21 but well below ideal 1.0)
+- tertile_gap negative (small-sigma underlearning, opposite of v2.3.12's positive)
+- Per-ticker sigma values more uniform than v2.3.12
+
+### Pre-registered acceptance/rejection of β-NLL as new production
+
+Original Amendment 1 rule was for v2.3.13 production decision after the full
+retrain. Restating it with the marginal-pass context from this smoke:
+
+- If β-NLL rank_corr ≥ standard − 0.01 (i.e., ≥ 0.51) AND tertile_gap |new|
+  < tertile_gap |old| (0.224 < 0.245): adopt β-NLL as v2.3.13 production.
+- If rank_corr < 0.51 OR tertile_gap |new| ≥ tertile_gap |old|: keep
+  standard NLL (v2.3.12 production stays).
+- Tied: keep standard (parsimony).
+
+This restatement clarifies "calibration improved" from Amendment 1 as
+"tertile_gap absolute value reduced". Restated BEFORE seeing production
+result.
+
