@@ -31,7 +31,7 @@ Headline hyperparameters (Trial #58, frozen since v2.3.7's Optuna study): `mediu
 
 1. **Screen the investment universe** (`screener.py`). Auto-discovers seeds from S&P 500 + NASDAQ-100 using GICS industry matching, combines with a small list of niche anchor tickers, and filters to ~84 stocks across 7 sectors (AI Compute, Neuromodulation, CNS Pharma, Digital Health, Space/Aerospace, Solar/Clean Energy, ETF benchmarks).
 2. **Collect sentiment** (`sentiment.py`). Four layers: news headlines via FinBERT, SEC EDGAR filings, FDA + ClinicalTrials.gov events, and earnings surprises. Produces 22 sentiment features per ticker.
-3. **Train on history** (`historical.py`, `training_universe.py`). Builds ~120K training samples from S&P 500 + NASDAQ-100 with 10 years of per-ticker snapshots, augmented with FRED macro series, Fama-French 5 factors, and cross-asset features (VIX, treasuries, gold, oil, USD). Trains an ensemble of 20 PyTorch networks with Huber loss (Optuna-tuned hyperparameters since v2.3.7).
+3. **Train on history** (`historical.py`, `training_universe.py`, `models.py`). Builds ~120K training samples from S&P 500 + NASDAQ-100 with 10 years of per-ticker snapshots, augmented with FRED macro series, Fama-French 5 factors, and cross-asset features (VIX, treasuries, gold, oil, USD). Trains an ensemble of 20 PyTorch networks with a heteroscedastic dual-head architecture (predicting both mean and log-volatility) using Gaussian NLL loss on log-transformed volatility targets. Hyperparameters are Optuna-tuned (Trial #58 best from v2.3.7's 60-trial TPE search). Note: Huber loss was used in v2.3.7 and earlier; v2.3.12 refactored to NLL to fix systematic risk over-prediction (see [v2.3.12 — Heteroscedastic NN](#v2312--heteroscedastic-nn-with-log-volatility-target) below).
 4. **Blend weights data-driven** (`blend_optimizer.py`). Finds the optimal mix of NN predictions and analyst consensus via a multi-window backtest (3m/6m/9m) with regime detection and bounded shrinkage toward a prior.
 5. **Select top 5** via a composite score that combines predicted Sharpe, MC Dropout confidence, uncertainty penalty, sentiment boost, and event-risk penalty.
 6. **Build the 3x3 allocation matrix** (`models.py`). A small neural network with a differentiable Sinkhorn layer that satisfies row (time horizon) and column (risk tier) marginal constraints, trained end-to-end with a Kahneman-Tversky asymmetric portfolio loss.
@@ -57,9 +57,10 @@ python run.py --torch --screen --sent --backtest
 # Hyperparameter optimization (Stage 1) — ~36-45h
 python optuna_search.py
 
-# Stage 2 production retrain with Optuna-best hyperparameters — ~1.9h
-python stage2_retrain.py                  # without SNDK (primary)
+# Stage 2 production retrain with Optuna-best hyperparameters — ~4-5h (v2.3.12 at N=20)
+python stage2_retrain.py                  # standard Gaussian NLL (current production default)
 python stage2_retrain.py --include-sndk   # with SNDK (sensitivity)
+python stage2_retrain.py --beta-nll       # beta-NLL loss (v2.3.13 comparison study)
 
 # Auxiliary analysis tools
 python compute_momentum_baseline.py       # NN vs proper-momentum baseline
@@ -79,20 +80,45 @@ Optionally, get a free [Finnhub API key](https://finnhub.io) and set `FINNHUB_AP
 ## Repository layout
 
 ```
-run.py                          Entry point
-config.py                       Hyperparameters
+# Entry point + config
+run.py                          Pipeline entry point
+config.py                       Hyperparameters and API keys (skip-worktree for local secrets)
+
+# Universe + raw data + features
 screener.py                     7-sector universe screening with auto seed discovery
-sentiment.py                    Multi-layer sentiment (news/SEC/FDA/trials/earnings)
+sentiment.py                    Multi-layer sentiment at runtime (news/SEC/FDA/trials/earnings)
 training_universe.py            S&P 500 + NASDAQ-100 + FRED + Fama-French + cross-asset
-historical.py                   Training data builder + Walk-Forward CV
-blend_optimizer.py              Multi-window backtest + regime detection + shrinkage
-backtest.py                     Stratified K-Fold portfolio backtest
-optuna_search.py                Stage 1 hyperparameter search (60-trial TPE, 6 dims)
-stage2_retrain.py               Stage 2 production retrain (N=20, 5-fold, SNDK exclusion)
-compute_momentum_baseline.py    Standalone momentum baseline (apples-to-apples)
-fix_spy_benchmark.py            SPY 3-month forward benchmark for stratified K-fold
-models.py                       Matrix Network + differentiable Sinkhorn
 data_auto.py                    yfinance data collection
+historical_earnings_scraper.py  Earnings calendar / surprise scraper (v2.3.10+)
+historical_sec_scraper.py       SEC EDGAR filing scraper (v2.3.10+)
+compute_historical_earnings_features.py  Earnings feature engineering (per-snapshot)
+compute_historical_sec_features.py       SEC filing feature engineering (per-snapshot)
+
+# Training data + models
+historical.py                   Training data builder + Walk-Forward CV
+models.py                       Heteroscedastic dual-head NN (v2.3.12) + Matrix Network + Sinkhorn
+
+# Optimization (Stage 1 hyperparam search + Stage 2 production retrain)
+optuna_search.py                Stage 1 search v1 (60-trial TPE, 6 dims, used for Trial #58)
+optuna_search_v2.py             Stage 1 search v2 (refined space, exploratory)
+optuna_search_v2310.py          Stage 1 search v2.3.10 (with extended feature set)
+stage2_retrain.py               Stage 2 production retrain (N=20 ensemble, 5-fold, SNDK exclusion)
+
+# Backtesting + downstream allocation
+backtest.py                     Stratified K-Fold portfolio backtest
+blend_optimizer.py              Multi-window backtest + regime detection + shrinkage
+
+# Auxiliary analysis (results-folder generators)
+compute_momentum_baseline.py    Standalone proper-momentum baseline
+fix_spy_benchmark.py            SPY 3-month forward benchmark for stratified K-fold
+transaction_cost_analysis.py    Korean broker route TC sensitivity grid (v2.3.11)
+merge_v2310_cache.py            One-off cache merge utility for v2.3.10 feature integration
+
+# v2.3.13 β-NLL comparison study (in-progress)
+pre_registration_v2313_betanll_study.md  Pre-registration + 3 amendments (committed before runs)
+smoke_v2313_betanll_comparison.py        Pre-launch smoke study (standard NLL vs β-NLL)
+
+# Support
 visualize.py                    Auto-generated figures
 requirements.txt                Dependencies
 ```
