@@ -122,3 +122,102 @@ N=5+ would be ideal for formal hypothesis testing but is reserved for the
 production retrain itself (N_ENSEMBLE=20 there provides better variance
 characterization across folds).
 
+
+---
+
+## Amendment 2 (2026-05-19, post-smoke-run-1): seed override patch required
+
+### Findings from smoke run 1 (commit 6271f59)
+
+Smoke run 1 was executed with 3 nominal seeds {42, 43, 44} per loss as per
+Amendment 1. Results showed **zero variance across seeds**:
+
+  standard   seed=42: rc=+0.595293 z_std=0.203345
+  standard   seed=43: rc=+0.595293 z_std=0.203345
+  standard   seed=44: rc=+0.595293 z_std=0.203345
+  beta_nll   seed=42: rc=+0.628706 z_std=0.280078
+  beta_nll   seed=43: rc=+0.628706 z_std=0.280078
+  beta_nll   seed=44: rc=+0.628706 z_std=0.280078
+
+Smoke run 1 results archived at `smoke_v2313_results_run1_seedfail.json`.
+
+### Root cause
+
+Lines 400-401 of `stage2_retrain.py` (in `run_fold_with_plot`):
+
+    torch.manual_seed(SEED + fold_id * 100 + nn_idx)
+    np.random.seed(SEED + fold_id * 100 + nn_idx)
+
+Re-seed at each NN training start using a deterministic formula
+(`SEED=42 + fold_id*100 + nn_idx`). This is a deliberate design choice to
+ensure production reproducibility across runs — but it overrides any
+caller-provided seed before NN training. Smoke run 1's `np.random.seed(42/43/44)`
+in `run_one()` was effectively discarded.
+
+This is **not a code bug** in the production sense; it is a reproducibility
+mechanism that conflicts with our smoke study's variance-estimation goal.
+
+### Decision rule consequence (without amendment 2)
+
+Run 1's effective N=1 measurement gives:
+
+- Criterion (a) No NaN: True ✓
+- Criterion (b) rank_corr Δ = +0.033 ≥ -0.05: True ✓
+- Criterion (c) |Δz_std| = 0.077 > 0.10: **False ✗**
+- LAUNCH: False (pre-registered)
+
+If accepted as-is, this would conclude the study with a null result. But the
+variance threshold for criterion (c) was designed assuming N=3 seed estimates;
+applying it to an effective-N=1 point estimate is a methodological violation
+of Amendment 1's intent.
+
+### Patch plan
+
+Modify `run_fold_with_plot` to accept an optional `seed_override` parameter:
+
+    def run_fold_with_plot(..., seed_override=None):
+        ...
+        # In the NN training loop (replacing lines 400-401):
+        if seed_override is None:
+            effective_seed = SEED + fold_id * 100 + nn_idx
+        else:
+            effective_seed = seed_override * 1000 + fold_id * 100 + nn_idx
+        torch.manual_seed(effective_seed)
+        np.random.seed(effective_seed)
+
+Production behavior is byte-identical when `seed_override=None` (the
+production main() does not pass this argument).
+
+Smoke run 2 will pass `seed_override=42, 43, 44` explicitly, allowing the
+formula to produce three genuinely distinct effective seeds.
+
+### Decision rule (unchanged from Amendment 1)
+
+Thresholds remain:
+- (a) No NaN in β-NLL runs
+- (b) β-NLL rank_corr ≥ standard - 0.05
+- (c) |β-NLL z_std mean - standard z_std mean| > 0.10
+
+What changes:
+- "z_std mean" now is a real mean across 3 distinct seeds (with non-zero std).
+- All other criteria unchanged.
+
+### Honest acknowledgment
+
+Run 1's z_std Δ was +0.077, below the 0.10 threshold. If Run 2 with real N=3
+gives Δ in [0.07, 0.13] range, the decision could flip on natural variance.
+This is an acceptable scientific outcome — amendment 1's threshold was chosen
+ex ante as the magnitude needed to justify a 5-hour production retrain.
+Variance-induced uncertainty on the decision is part of the experimental design.
+
+If Run 2 still gives Δ < 0.10 with real variance, the LAUNCH decision remains
+False and v2.3.12 production remains final.
+
+### Why this amendment, not a quiet code fix
+
+The Run 1 result is preserved in `smoke_v2313_results_run1_seedfail.json`
+and this amendment timestamps the discovery + patch design BEFORE Run 2.
+Any future reviewer can verify: Amendment 2 acknowledges Run 1's
+specific result and pre-commits to a Run 2 with corrected methodology
+under unchanged decision thresholds.
+
