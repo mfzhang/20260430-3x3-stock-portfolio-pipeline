@@ -388,3 +388,94 @@ if completed:
 ---
 
 **End of pre-registration v2315.**
+
+---
+
+## 12. Amendment 1 — Fold convention alignment with v2.3.12 production (2026-05-19)
+
+**Amendment date**: 2026-05-19 (same day as initial pre-registration `7288c5b`)
+**Status**: Applied before any v3 driver code was written. Per Asymmetric Validation Principle §2, amendments during pre-registration phase (before evaluation result is known) are explicitly permitted.
+
+### 12.1 Discovery that triggered this amendment
+
+While auditing candidate base scripts for `optuna_search_v3.py`, the following was found by direct file inspection of three pre-existing Optuna driver scripts in the repository:
+
+- `optuna_search.py` (v2.3.6 original, study `stage1_nn_feat_6dims`, storage `optuna_storage.db`): 4 folds (`STAGE1_FOLD_INDICES = [1, 2, 3, 4]`), Fold 1 entirely excluded.
+- `optuna_search_v2.py` (v2.3.10, study `stage1_5fold_no_sndk`, storage `optuna_storage_v2.db`): 5 folds (`STAGE1_FOLD_INDICES = [0, 1, 2, 3, 4]`), SNDK excluded at the ticker level via `EXCLUDED_TICKERS = {'SNDK'}`.
+- `optuna_search_v2310.py` (v2.3.10 ablation, study `stage1_v2310_100feats_5fold_no_sndk`): identical methodology to `_v2.py`, only differs in cache/storage/study-name path strings.
+
+The v2.3.10 docstring of `optuna_search_v2.py` explicitly states the rationale for the methodology change:
+
+> "Original v1 excluded Fold 1 entirely to avoid SNDK +194.7% post-IPO artifact distorting alpha. But the artifact is the *ticker*, not the *fold*. Excluding SNDK alone preserves Fold 1 (n=104 other tickers) for hyperparameter selection at marginal time cost (+25% wallclock)."
+
+Cross-checking against v2.3.12 production output (`results/stage2/top1_trial58/summary.json`, verified at session open):
+
+```
+fold_ids_used: [1, 2, 3, 4, 5]   # 1-indexed; all 5 folds used
+sndk_excluded: True              # ticker-level exclusion at data load
+```
+
+This confirms that v2.3.10's methodological correction (5 folds + SNDK ticker exclusion) is the production convention. It was carried forward into v2.3.12 production retraining.
+
+The original pre-registration (`7288c5b`) inadvertently retained the v2.3.6 4-fold convention in §3, creating a mismatch between Stage 1 (this study) and Stage 2 (production deployment) — exactly the kind of methodological drift v2.3.15 was launched to eliminate.
+
+### 12.2 Why this amendment does not undermine validation logic
+
+The Asymmetric Validation Principle §2 permits amendments when "discoveries during the study force methodological updates". This amendment satisfies §2 because:
+
+1. **Discovery is documentary, not data-driven**: no trial has run yet. The amendment corrects an oversight in §3's fold specification, identified through source-code audit of pre-existing v2.3.6 and v2.3.10 scripts. No threshold has been moved after seeing a result.
+2. **Amendment makes the study more conservative, not less**: 5-fold + ticker exclusion runs more trials per study (~+25% wallclock) and tests on a larger held-out ticker population per fold. It is methodologically stricter than the original §3 specification.
+3. **Amendment aligns Stage 1 with production**: the entire purpose of v2.3.15 is to eliminate the loss-mismatch between v2.3.6 Optuna (Huber) and v2.3.12 production (NLL). It would be self-defeating to introduce a NEW fold-convention mismatch in the process. Amendment 1 closes a discovered gap; the original §3 created one.
+4. **Hypothesis (§1) is unchanged**: H0 ("Trial #58 hyperparameters are not optimal under heteroscedastic Gaussian NLL") and H1 ("Trial #58 hyperparameters are robust to the loss change") remain the questions tested. The amendment only specifies that "the production setup" against which robustness is tested is the full v2.3.12 setup (NLL + 5-fold + SNDK ticker exclusion), not a partial v2.3.6 setup.
+5. **Acceptance rule (§5) is unchanged**: Trial #58 comparison values (lr=2.5e-4, wd=1.64e-4, arch=medium, var_thr=0.00197, corr_thr=0.0838, dropout=0.2 reference) and the `|log10(new/old)| > 0.3` divergence threshold all remain in force. Trial #58 hyperparameters drive v2.3.12 production deployment regardless of which Optuna study produced them; they are the correct comparison reference.
+6. **Ex ante observations (§7) remain valid**: §7's predictions are about the loss-landscape behavior (NLL vs Huber regularization, heteroscedastic head capacity, etc.) and do not depend on fold count. The dropout prediction (§7.5) is unaffected.
+
+### 12.3 Rule changes (mechanical)
+
+The following specifications in §3 and §6 are **superseded** by Amendment 1:
+
+**§3 — Trial budget, folds, and training configuration**
+
+The `FOLDS` row of the table:
+
+| Specification | Original (`7288c5b`) | After Amendment 1 |
+|---|---|---|
+| `FOLDS` | `[1, 2, 3, 4]` (0-indexed; Fold 2–5) | `[0, 1, 2, 3, 4]` (0-indexed; all 5 folds) |
+| `EXCLUDED_TICKERS` | (not present) | `{'SNDK'}` (ticker-level filter at data load) |
+
+The "Note on fold convention" paragraph at the end of §3 is superseded by:
+
+> **Note on fold convention (post-Amendment 1)**: v2.3.15 Optuna uses **5 folds + SNDK ticker-level exclusion at data load**, matching v2.3.10 (`optuna_search_v2.py`) and v2.3.12 production (`stage2_retrain.py`). SNDK exclusion happens in `_load_data()` before any fold split. Stage 1 (this study) and Stage 2 (downstream retrain in v2.3.16) use the **same data setup**, eliminating the methodological drift that v2.3.6 → v2.3.7 → v2.3.10 had carried implicitly.
+
+**§6 — Cache, storage, and infrastructure strategy**
+
+The "New Optuna study name" row of the table:
+
+| Specification | Original (`7288c5b`) | After Amendment 1 |
+|---|---|---|
+| Study name | `stage1_nn_feat_6dims_NLL` | `stage1_5fold_NLL_6dims_no_sndk` |
+
+Name change rationale: the new name encodes all three production-aligning methodological choices — 5 folds, NLL loss, 6 search dimensions, SNDK ticker exclusion. This matches v2.3.10's naming convention (`stage1_5fold_no_sndk` + descriptors).
+
+All other §6 specifications (storage = `sqlite:///optuna_storage_v2315.db`, cache = `results/backtest_cache.npz` reused unchanged, output dir = `results/stage1_v2315/`) remain in force.
+
+### 12.4 Wall-clock implication
+
+Original §3 estimated ~30–45h based on v2.3.6 4-fold + Huber timing. The 5-fold + dropout + NLL setup is expected to run **~45–55h** based on v2.3.10's empirical +25% (4→5 fold) and rough parity for NLL-vs-Huber per-epoch cost. Within multi-day operational tolerance; does not change pre-flight or launch procedure.
+
+### 12.5 Implementation prerequisites enabled by this amendment
+
+Amendment 1 fixes v3's fold convention. Two separate prerequisites remain for `optuna_search_v3.py` to function:
+
+- **(P1) Dropout config exposure**: `backtest.py:309` and `historical.py:426` currently hardcode `dropout=0.2`. For v3's `dropout` search dimension to actually flow into training, these must read from a new `TRAINING_DROPOUT` config flag (same pattern as v2.3.6's `VAR_THRESHOLD` / `CORR_THRESHOLD` exposure in commit `5c66baf`). The cross-sector diagnostic block (`backtest.py:638`) intentionally remains hardcoded (v2.3.6 §52.4 / v2.3.8 §80 convention — trial-invariant diagnostic for cross-trial comparability).
+- **(P2) Adam weight_decay**: already config-driven via `getattr(config, 'TRAINING_WEIGHT_DECAY', 1e-4)` at `backtest.py:311` (v2.3.8 commit `7889623` Defect A fix). The v2.3.6-era Adam monkey-patch in `optuna_search.py` / `optuna_search_v2.py` is **no longer needed** for v3 — `_override_config()` is sufficient. v3 simplifies on this dimension.
+
+P1 will be a separate commit before the `optuna_search_v3.py` commit, following the v2.3.6 commit `5c66baf` precedent (prerequisite code change ships independently of the consumer script).
+
+### 12.6 Audit trail summary (commits referenced by this amendment)
+
+- `7288c5b` (this commit's parent): initial pre-registration of v2.3.15 (v2.3.6 fold convention, incorrect — corrected here)
+- `5c66baf` (v2.3.6): `VAR_THRESHOLD` / `CORR_THRESHOLD` config exposure precedent — pattern reused for P1 (`TRAINING_DROPOUT`)
+- `7889623` (v2.3.8): Defect A fix, `TRAINING_WEIGHT_DECAY` made config-driven across all production paths — eliminates Adam monkey-patch requirement in v3
+
+**End of Amendment 1.**
