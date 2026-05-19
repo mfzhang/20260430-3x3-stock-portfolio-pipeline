@@ -33,7 +33,7 @@ import torch.optim as optim
 
 sys.path.insert(0, '.')
 
-from models import HeteroscedasticDualHeadNN, heteroscedastic_loss
+from models import HeteroscedasticDualHeadNN, heteroscedastic_loss, heteroscedastic_loss_beta
 
 # ============================================================
 # CONFIGURATION
@@ -44,6 +44,10 @@ FOLDS_STAGE2 = [0, 1, 2, 3, 4]
 EXCLUDED_TICKERS = {'SNDK'}
 N_SELECT = 5
 RESULTS_DIR = Path('results/stage2')
+
+# Loss function dispatcher (overridden in main if --beta-nll passed)
+LOSS_FN = heteroscedastic_loss
+LOSS_LABEL = 'standard Gaussian NLL (Kendall & Gal 2017)'
 PER_SNAPSHOT_BUCKET = 'M'
 
 # Log-transform clamp for volatility target (Andersen et al. 2003, Econometrica).
@@ -426,7 +430,7 @@ def run_fold_with_plot(data, train_tickers, test_tickers, fold_id,
                 yr = Yr_fit_t[bi]
                 yk = Yk_fit_t[bi]
                 pred = model(xb)
-                loss, _, _ = heteroscedastic_loss(pred, yr, yk)
+                loss, _, _ = LOSS_FN(pred, yr, yk)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
@@ -436,7 +440,7 @@ def run_fold_with_plot(data, train_tickers, test_tickers, fold_id,
             model.eval()
             with torch.no_grad():
                 pred_val = model(X_val_t)
-                vl, _, _ = heteroscedastic_loss(pred_val, Yr_val_t, Yk_val_t)
+                vl, _, _ = LOSS_FN(pred_val, Yr_val_t, Yk_val_t)
             val_loss = vl.item()
 
             if live_plot is not None:
@@ -752,16 +756,28 @@ def main():
     parser.add_argument('--results-json',
                         default='results/optuna_stage1_results.json')
     parser.add_argument('--include-sndk', action='store_true')
+    parser.add_argument('--beta-nll', action='store_true',
+                        help='Use beta-NLL loss (Seitzer et al. 2022) for v2.3.13 comparison study')
     args = parser.parse_args()
 
     np.random.seed(SEED)
     torch.manual_seed(SEED)
 
-    global EXCLUDED_TICKERS, RESULTS_DIR
+    global EXCLUDED_TICKERS, RESULTS_DIR, LOSS_FN, LOSS_LABEL
     if args.include_sndk:
         EXCLUDED_TICKERS = set()
         RESULTS_DIR = Path('results/stage2_with_sndk')
         print("[Sensitivity mode] SNDK included; output -> results/stage2_with_sndk/")
+
+    if args.beta_nll:
+        LOSS_FN = heteroscedastic_loss_beta
+        LOSS_LABEL = 'beta-NLL (Seitzer et al. 2022, beta=0.5)'
+        # Comparison study output directory — does NOT overwrite v2.3.12 production
+        if args.include_sndk:
+            RESULTS_DIR = Path('results/stage2_with_sndk_betaNLL')
+        else:
+            RESULTS_DIR = Path('results/stage2_betaNLL')
+        print(f"[v2.3.13 comparison study] beta-NLL active; output -> {RESULTS_DIR}/")
 
     with open(args.results_json) as f:
         optuna_results = json.load(f)
