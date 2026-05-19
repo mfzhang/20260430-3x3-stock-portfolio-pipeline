@@ -306,7 +306,7 @@ def _run_single_fold(X, Y_ret, Y_risk, sample_tickers, meta,
             arch_map = {'small': [32, 16], 'medium': [64, 32, 16],
                         'large': [128, 64, 32]}
             arch = arch_map.get(arch, [64, 32, 16])
-        model = HeteroscedasticDualHeadNN(in_dim=D, hidden_dims=arch, dropout=0.2)
+        model = HeteroscedasticDualHeadNN(in_dim=D, hidden_dims=arch, dropout=getattr(config, 'TRAINING_DROPOUT', 0.2))
         opt = torch.optim.Adam(model.parameters(), lr=lr,
                        weight_decay=getattr(config, 'TRAINING_WEIGHT_DECAY', 1e-4))
 

@@ -423,7 +423,7 @@ def _train_fold_torch(X_tr, Y_ret_tr, Y_risk_tr, X_te, Y_ret_te, Y_risk_te):
     yr = torch.tensor(Y_ret_tr, dtype=torch.float32)
     yk_log = torch.tensor(Yk_tr_log, dtype=torch.float32)
 
-    model = HeteroscedasticDualHeadNN(in_dim=D, hidden_dims=arch, dropout=0.2)
+    model = HeteroscedasticDualHeadNN(in_dim=D, hidden_dims=arch, dropout=getattr(config, 'TRAINING_DROPOUT', 0.2))
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     model.train()

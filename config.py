@@ -88,6 +88,7 @@ TRAINING_EPOCHS = 5000
 TRAINING_LR = 0.00024955280836145015           # ~2.5e-4
 TRAINING_WEIGHT_DECAY = 0.00016413025522015487  # ~1.64e-4
 TRAINING_HUBER_DELTA = 0.5
+TRAINING_DROPOUT = 0.2                  # NN dropout (hardcoded in v2.3.6/v2.3.12; tunable in v2.3.15+)
 
 # Feature selection thresholds (Optuna best)
 VAR_THRESHOLD = 0.001971224419059394             # ~0.00197
