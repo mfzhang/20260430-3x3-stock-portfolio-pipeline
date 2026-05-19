@@ -1,0 +1,180 @@
+[v2.3.13 comparison study] beta-NLL active; output -> results/stage2_betaNLL/
+======================================================================
+STAGE 2 RETRAIN — top1_trial58
+======================================================================
+Optuna Stage 1 mean rank_corr (N=5, 4-fold): +0.5616
+Hyperparameters:
+  lr                 = 0.00024955280836145015
+  weight_decay       = 0.00016413025522015487
+  huber_delta        = 0.5
+  architecture       = medium
+  var_threshold      = 0.001971224419059394
+  corr_threshold     = 0.0837536123288791
+
+Stage 2 settings:
+  N_ENSEMBLE  = 20
+  Folds       = [1, 2, 3, 4, 5]
+  Excluded    = ['SNDK']
+  Live plot   = ON
+  Loss        = Gaussian NLL (heteroscedastic, Kendall & Gal 2017)
+  Risk target = log-space (Andersen et al. 2003)
+======================================================================
+[Data] Loading results/backtest_cache.npz...
+[Data] Excluded 17 samples from ['SNDK'] (was 122257, now 122240)
+[Data] 122,240 samples × 97 features, 525 tickers, date range 2016-07-21 ~ 2026-01-16
+
+────────────────────────────────────────────────────────────
+Fold 1/5 — Train: 413, Test: 112 tickers
+────────────────────────────────────────────────────────────
+    Features: 33 selected (var_thr=0.0020, corr_thr=0.0838)
+    Train fit: 86,494, val: 9,610, test: 26,136
+    NN #1: val_NLL=-0.445316 at epoch 10, stopped at 51
+    NN #2: val_NLL=-0.451253 at epoch 11, stopped at 52
+    NN #3: val_NLL=-0.450762 at epoch 17, stopped at 58
+    NN #4: val_NLL=-0.476974 at epoch 14, stopped at 55
+    NN #5: val_NLL=-0.439362 at epoch 12, stopped at 53
+    NN #6: val_NLL=-0.453060 at epoch 11, stopped at 52
+    NN #7: val_NLL=-0.432461 at epoch 15, stopped at 56
+    NN #8: val_NLL=-0.454548 at epoch 11, stopped at 52
+    NN #9: val_NLL=-0.436167 at epoch 13, stopped at 54
+    NN #10: val_NLL=-0.469572 at epoch 21, stopped at 62
+    NN #11: val_NLL=-0.447593 at epoch 7, stopped at 48
+    NN #12: val_NLL=-0.444475 at epoch 11, stopped at 52
+    NN #13: val_NLL=-0.496769 at epoch 22, stopped at 63
+    NN #14: val_NLL=-0.496151 at epoch 14, stopped at 55
+    NN #15: val_NLL=-0.442337 at epoch 12, stopped at 53
+    NN #16: val_NLL=-0.438926 at epoch 24, stopped at 65
+    NN #17: val_NLL=-0.477983 at epoch 17, stopped at 58
+    NN #18: val_NLL=-0.438452 at epoch 15, stopped at 56
+    NN #19: val_NLL=-0.454490 at epoch 20, stopped at 61
+    NN #20: val_NLL=-0.447960 at epoch 17, stopped at 58
+  Fold 1 done: rank_corr=+0.2950, alpha=+3.9%p, top5=['SMCI', 'NCLH', 'COHR', 'DASH', 'FCX'], elapsed=5.6min
+
+────────────────────────────────────────────────────────────
+Fold 2/5 — Train: 420, Test: 105 tickers
+────────────────────────────────────────────────────────────
+    Features: 33 selected (var_thr=0.0020, corr_thr=0.0838)
+    Train fit: 87,956, val: 9,772, test: 24,512
+    NN #1: val_NLL=-0.435147 at epoch 8, stopped at 49
+    NN #2: val_NLL=-0.453032 at epoch 10, stopped at 51
+    NN #3: val_NLL=-0.427513 at epoch 12, stopped at 53
+    NN #4: val_NLL=-0.443494 at epoch 10, stopped at 51
+    NN #5: val_NLL=-0.448159 at epoch 15, stopped at 56
+    NN #6: val_NLL=-0.429130 at epoch 22, stopped at 63
+    NN #7: val_NLL=-0.441558 at epoch 10, stopped at 51
+    NN #8: val_NLL=-0.448390 at epoch 5, stopped at 46
+    NN #9: val_NLL=-0.425199 at epoch 50, stopped at 91
+    NN #10: val_NLL=-0.443310 at epoch 7, stopped at 48
+    NN #11: val_NLL=-0.433919 at epoch 18, stopped at 59
+    NN #12: val_NLL=-0.438443 at epoch 8, stopped at 49
+    NN #13: val_NLL=-0.440525 at epoch 8, stopped at 49
+    NN #14: val_NLL=-0.425265 at epoch 14, stopped at 55
+    NN #15: val_NLL=-0.462577 at epoch 13, stopped at 54
+    NN #16: val_NLL=-0.437177 at epoch 11, stopped at 52
+    NN #17: val_NLL=-0.433278 at epoch 14, stopped at 55
+    NN #18: val_NLL=-0.450168 at epoch 8, stopped at 49
+    NN #19: val_NLL=-0.433946 at epoch 11, stopped at 52
+    NN #20: val_NLL=-0.425499 at epoch 19, stopped at 60
+  Fold 2 done: rank_corr=+0.6134, alpha=+8.2%p, top5=['CVNA', 'COIN', 'SHOP', 'ZS', 'DDOG'], elapsed=5.6min
+
+────────────────────────────────────────────────────────────
+Fold 3/5 — Train: 420, Test: 105 tickers
+────────────────────────────────────────────────────────────
+    Features: 33 selected (var_thr=0.0020, corr_thr=0.0838)
+    Train fit: 87,913, val: 9,768, test: 24,559
+    NN #1: val_NLL=-0.436831 at epoch 10, stopped at 51
+    NN #2: val_NLL=-0.409907 at epoch 22, stopped at 63
+    NN #3: val_NLL=-0.418052 at epoch 75, stopped at 116
+    NN #4: val_NLL=-0.440677 at epoch 13, stopped at 54
+    NN #5: val_NLL=-0.435648 at epoch 16, stopped at 57
+    NN #6: val_NLL=-0.415183 at epoch 18, stopped at 59
+    NN #7: val_NLL=-0.463277 at epoch 15, stopped at 56
+    NN #8: val_NLL=-0.473483 at epoch 15, stopped at 56
+    NN #9: val_NLL=-0.488110 at epoch 11, stopped at 52
+    NN #10: val_NLL=-0.429998 at epoch 24, stopped at 65
+    NN #11: val_NLL=-0.441027 at epoch 19, stopped at 60
+    NN #12: val_NLL=-0.420131 at epoch 13, stopped at 54
+    NN #13: val_NLL=-0.426579 at epoch 11, stopped at 52
+    NN #14: val_NLL=-0.435323 at epoch 16, stopped at 57
+    NN #15: val_NLL=-0.432034 at epoch 12, stopped at 53
+    NN #16: val_NLL=-0.477683 at epoch 17, stopped at 58
+    NN #17: val_NLL=-0.460958 at epoch 22, stopped at 63
+    NN #18: val_NLL=-0.425414 at epoch 15, stopped at 56
+    NN #19: val_NLL=-0.456023 at epoch 13, stopped at 54
+    NN #20: val_NLL=-0.475211 at epoch 18, stopped at 59
+  Fold 3 done: rank_corr=+0.4119, alpha=+4.4%p, top5=['MRNA', 'TTD', 'ALNY', 'DVN', 'WDC'], elapsed=6.3min
+
+────────────────────────────────────────────────────────────
+Fold 4/5 — Train: 423, Test: 102 tickers
+────────────────────────────────────────────────────────────
+    Features: 32 selected (var_thr=0.0020, corr_thr=0.0838)
+    Train fit: 88,296, val: 9,810, test: 24,134
+    NN #1: val_NLL=-0.435020 at epoch 22, stopped at 63
+    NN #2: val_NLL=-0.452320 at epoch 7, stopped at 48
+    NN #3: val_NLL=-0.414786 at epoch 83, stopped at 124
+    NN #4: val_NLL=-0.508471 at epoch 11, stopped at 52
+    NN #5: val_NLL=-0.446289 at epoch 16, stopped at 57
+    NN #6: val_NLL=-0.426648 at epoch 18, stopped at 59
+    NN #7: val_NLL=-0.496073 at epoch 22, stopped at 63
+    NN #8: val_NLL=-0.429231 at epoch 8, stopped at 49
+    NN #9: val_NLL=-0.430916 at epoch 14, stopped at 55
+    NN #10: val_NLL=-0.438896 at epoch 26, stopped at 67
+    NN #11: val_NLL=-0.444775 at epoch 9, stopped at 50
+    NN #12: val_NLL=-0.425629 at epoch 123, stopped at 164
+    NN #13: val_NLL=-0.422112 at epoch 10, stopped at 51
+    NN #14: val_NLL=-0.430589 at epoch 8, stopped at 49
+    NN #15: val_NLL=-0.456292 at epoch 14, stopped at 55
+    NN #16: val_NLL=-0.504478 at epoch 10, stopped at 51
+    NN #17: val_NLL=-0.459201 at epoch 18, stopped at 59
+    NN #18: val_NLL=-0.446127 at epoch 22, stopped at 63
+    NN #19: val_NLL=-0.468476 at epoch 16, stopped at 57
+    NN #20: val_NLL=-0.426809 at epoch 18, stopped at 59
+  Fold 4 done: rank_corr=+0.5706, alpha=+7.0%p, top5=['HOOD', 'PDD', 'TSLA', 'APA', 'AMD'], elapsed=6.0min
+
+────────────────────────────────────────────────────────────
+Fold 5/5 — Train: 424, Test: 101 tickers
+────────────────────────────────────────────────────────────
+    Features: 33 selected (var_thr=0.0020, corr_thr=0.0838)
+    Train fit: 89,407, val: 9,934, test: 22,899
+    NN #1: val_NLL=-0.465641 at epoch 14, stopped at 55
+    NN #2: val_NLL=-0.425838 at epoch 15, stopped at 56
+    NN #3: val_NLL=-0.412665 at epoch 43, stopped at 84
+    NN #4: val_NLL=-0.444217 at epoch 9, stopped at 50
+    NN #5: val_NLL=-0.430395 at epoch 20, stopped at 61
+    NN #6: val_NLL=-0.436802 at epoch 11, stopped at 52
+    NN #7: val_NLL=-0.430014 at epoch 18, stopped at 59
+    NN #8: val_NLL=-0.433002 at epoch 14, stopped at 55
+    NN #9: val_NLL=-0.413147 at epoch 24, stopped at 65
+    NN #10: val_NLL=-0.465190 at epoch 8, stopped at 49
+    NN #11: val_NLL=-0.433057 at epoch 8, stopped at 49
+    NN #12: val_NLL=-0.429667 at epoch 23, stopped at 64
+    NN #13: val_NLL=-0.430081 at epoch 16, stopped at 57
+    NN #14: val_NLL=-0.433971 at epoch 22, stopped at 63
+    NN #15: val_NLL=-0.435805 at epoch 18, stopped at 59
+    NN #16: val_NLL=-0.423186 at epoch 16, stopped at 57
+    NN #17: val_NLL=-0.426823 at epoch 10, stopped at 51
+    NN #18: val_NLL=-0.441242 at epoch 10, stopped at 51
+    NN #19: val_NLL=-0.426790 at epoch 21, stopped at 62
+    NN #20: val_NLL=-0.436949 at epoch 17, stopped at 58
+  Fold 5 done: rank_corr=+0.5505, alpha=+8.8%p, top5=['APP', 'MSTR', 'PLTR', 'ARM', 'XYZ'], elapsed=6.2min
+
+[Task B] Computing SPY benchmarks...
+
+[Output] All results written to results/stage2_betaNLL/top1_trial58/
+
+======================================================================
+STAGE 2 COMPLETE — top1_trial58
+======================================================================
+Mean rank_corr (5 folds, N=20):  +0.4883  ± 0.1179
+Mean selection alpha:             +6.5%p  ± 2.0%p
+
+Comparison points:
+  Optuna Stage 1 (N=5, 4-fold):  +0.5616
+  v2.3.4 baseline (N=20, 5-fold): +0.5311 (with SNDK, Huber)
+  v2.3.8 baseline (N=20, 5-fold): +0.5181 (no SNDK, Huber)
+  Stage 2 NLL (N=20, 5-fold):     +0.4883 (no SNDK, Gaussian NLL log-vol)
+
+Total elapsed: 29.8 min (0.5 h)
+
+Close plot window manually when done reviewing.
+Press Enter to close plot and exit... 

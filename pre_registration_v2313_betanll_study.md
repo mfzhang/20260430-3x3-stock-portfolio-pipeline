@@ -298,3 +298,21 @@ This restatement clarifies "calibration improved" from Amendment 1 as
 "tertile_gap absolute value reduced". Restated BEFORE seeing production
 result.
 
+## Amendment 4 — Final decision (2026-05-19)
+
+Production β-NLL retrain (5-fold N=20, Trial #58 hyperparameters, no SNDK) completed in 29.8 min on 2026-05-19.
+
+**Result**: rank_corr_mean = 0.4883 ± 0.118, selection_alpha = +6.46%p ± 2.0%p.
+
+**Comparison to v2.3.12 standard NLL** (same Trial #58, no SNDK): rank_corr 0.502, selection_alpha +7.61%p. β-NLL is worse on both metrics (Δ rank_corr = −0.014, Δ alpha = −1.15%p).
+
+**Mechanical decision per Amendment 3 acceptance rule**:
+- Criterion (a) rank_corr ≥ 0.51: **FAIL** (0.4883, gap −0.0217)
+- Criterion (b) |tertile_gap| < 0.245: not evaluated (a failed; full null path)
+- Path: full null → **Keep v2.3.12 standard NLL as production.**
+
+No discretion applied. This is a complete null on rank correlation. β-NLL's calibration benefit (if any) is not measured because the gating criterion (a) excluded it from adoption.
+
+**Wall-clock observation**: 29.8 min was substantially faster than the pre-flight estimate of 4-5h. Per-NN best epoch landed at ~10-50 with patience=41 firing aggressively (vs v2.3.12 standard NLL ~2.5 min/NN at similar architecture). This is consistent with Seitzer β-NLL's σ²ᵝ sample weighting downweighting easy samples and shortening the useful learning window. Not a bug; algorithmic property.
+
+**Cosmetic banner bug noted**: production banner printed "Loss = Gaussian NLL (heteroscedastic, Kendall & Gal 2017)" but β-NLL was active (verified by `[v2.3.13 comparison study] beta-NLL active` prefix line + output redirect to `results/stage2_betaNLL/`). `LOSS_LABEL` global not referenced in banner print block. Cosmetic only — results unaffected. Queued for v2.3.14+ cleanup.
