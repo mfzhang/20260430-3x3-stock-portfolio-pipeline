@@ -4,23 +4,28 @@ A deep-learning pipeline I built to help me allocate ~KRW 20M across US equities
 
 I come from a neuroscience / cognitive engineering / neuroimaging background, not finance, so this repo is also how I learn quantitative investing from first principles. Treat it accordingly: it's a working system that I actually use, but it's a personal project, not a professional product.
 
-## Latest results (v2.3.7)
+## Latest results (v2.3.12)
 
-Stage 2 production retrain with Optuna-tuned hyperparameters and a 5-fold stratified K-fold backtest at production scale (N=20 ensemble, 526 training tickers). Sensitivity analysis run with and without SNDK (a 26.5σ post-IPO outlier from the 2024-10 WDC spinoff) to isolate its effect.
+Production system uses a heteroscedastic dual-head neural network with Gaussian NLL loss on log-transformed volatility targets — refactored in v2.3.12 (commits `5220c17`, `4cd239f`) to address systematic risk over-prediction observed in v2.3.7's softplus point-estimate output, where defensive tickers like MDT/JNJ/RTX were predicted at 95-200% volatility against realized 16-22%. Hyperparameters come from a 60-trial Optuna TPE search (Trial #58 best, frozen since v2.3.7). 5-fold stratified K-fold backtest at production scale (N=20 ensemble, SNDK ticker-level exclusion).
 
-| Metric | Without SNDK (primary) | With SNDK (sensitivity) |
+| Metric | v2.3.12 (current production) | v2.3.7 (for reference) |
 |---|---|---|
-| Rank correlation | 0.518 ± 0.079 | 0.521 ± 0.078 |
-| α vs universe equal-weight | +7.1%p ± 1.5%p | +14.8%p ± 14.0%p |
-| α vs SPY (cap-weighted) | +8.1%p ± 1.7%p | +16.0%p ± 16.6%p |
-| α vs proper momentum | +5.87%p ± 2.63%p | +6.34%p ± 2.57%p |
-| NN beats momentum | 5/5 folds | 5/5 folds |
+| Rank correlation | 0.502 ± 0.108 | 0.518 ± 0.079 |
+| α vs universe equal-weight | +7.6%p ± 3.4%p | +7.1%p ± 1.5%p |
+| α vs SPY (cap-weighted) | (recomputed per fold via Task B; see fold artifacts) | +8.1%p ± 1.7%p |
+| α vs proper momentum | (preserved from v2.3.7 measurement) | +5.87%p ± 2.63%p (5/5 folds NN wins) |
+| Top-5 hit rate | 5/5 folds positive | 5/5 folds positive |
+| Universe NN risk mean | 25.6 – 27.5% across folds (realistic, near actual 27-30%) | 86.2% — broken, systematically over-predicted |
 
-The without-SNDK numbers are reported as primary because the with-SNDK aggregate has 10× wider standard deviation, dominated by Fold 1 alone (where SNDK contributes +37%p of the +44.9%p alpha). The momentum-comparison edge (+5.87 to +6.34%p) is the most robust metric — nearly identical across configurations, 5/5 folds, all with similar standard deviation.
+The headline rank correlation drops slightly (0.518 → 0.502) but the NN now produces deployable risk numbers; v2.3.7's risk predictions were unusable for portfolio allocation despite the higher rank correlation. The momentum-comparison edge (+5.87%p, the most robust skill metric) is inherited from v2.3.7's measurement; v2.3.12's per-fold momentum baselines are not yet recomputed.
 
-Headline hyperparameters from Optuna (60-trial TPE search over 6 dimensions, Trial #58 best): `medium [64,32,16] architecture`, `lr=2.5e-4`, `huber_delta=0.5`, `weight_decay=1.6e-4`, `var_threshold=0.002`, `corr_threshold=0.084`. See [Hyperparameter optimization](#hyperparameter-optimization-stage-1) and [Stage 2 production retrain](#stage-2-production-retrain) sections below for details.
+Headline hyperparameters (Trial #58, frozen since v2.3.7's Optuna study): `medium [64,32,16] architecture`, `lr=2.5e-4`, `weight_decay=1.6e-4`, `var_threshold=0.002`, `corr_threshold=0.084`. The `huber_delta=0.5` value was selected by the Optuna search but no longer applies — v2.3.12 uses Gaussian NLL, not Huber loss. See [Hyperparameter optimization](#hyperparameter-optimization-stage-1), [Stage 2 production retrain](#stage-2-production-retrain), and the v2.3.12 architecture section below for details.
 
-**Subsequent work**: v2.3.11 adds a [transaction cost analysis](#stage-1--transaction-cost-analysis-v2311) calibrated to the Korean broker route (Korea Investment & Securities). v2.3.12 refactors the NN to a [heteroscedastic dual-head architecture](#v2312--heteroscedastic-nn-with-log-volatility-target) trained with Gaussian NLL on log-transformed volatility, addressing systematic risk over-prediction observed in v2.3.7 production output. Smoke tests passed across two architectures; production retrain in progress at the time of writing.
+### Recent work
+
+- v2.3.11 added a [transaction cost analysis](#stage-1--transaction-cost-analysis-v2311) calibrated to the Korean broker route (Korea Investment & Securities). Main scenario (₩1M position × quarterly rebalance) yields +7.55%p net alpha after frictions.
+- v2.3.12 refactored the NN to a [heteroscedastic dual-head architecture](#v2312--heteroscedastic-nn-with-log-volatility-target) trained with Gaussian NLL on log-transformed volatility. Risk over-prediction resolved; this is the current production system.
+- **v2.3.13 is an in-progress pre-registered comparison study** testing whether β-NLL (Seitzer et al. 2022) outperforms standard NLL on calibration metrics. The full β-NLL retrain (~5h at N=20) is running at the time of writing; the v2.3.12 production result above is the baseline. Pre-registration, smoke study results (effective N=1 Run 1 and N=3 Run 2), and the acceptance/rejection decision rule were all committed to GitHub before the production β-NLL training began. See `pre_registration_v2313_betanll_study.md` and commits `cdcb2f1`, `653688c`, `8d6a7c7`, `aeac1e0`.
 
 ## What the pipeline does
 
