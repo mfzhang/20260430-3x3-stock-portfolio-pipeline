@@ -288,7 +288,7 @@ def patch_adam(weight_decay_override):
 # ============================================================
 def run_fold_with_plot(data, train_tickers, test_tickers, fold_id,
                        config_module, live_plot, n_ensemble, n_select,
-                       config_label):
+                       config_label, seed_override=None):
     """
     One fold of heteroscedastic ensemble training + per-ticker aggregation.
 
@@ -397,8 +397,15 @@ def run_fold_with_plot(data, train_tickers, test_tickers, fold_id,
     ens_risk_log_sigma = []
 
     for nn_idx in range(n_ensemble):
-        torch.manual_seed(SEED + fold_id * 100 + nn_idx)
-        np.random.seed(SEED + fold_id * 100 + nn_idx)
+        # [v2.3.13 amendment 2] Allow caller seed override for variance studies.
+        # Production main() does not pass seed_override -> falls back to
+        # original deterministic formula (byte-identical behavior).
+        if seed_override is None:
+            effective_seed = SEED + fold_id * 100 + nn_idx
+        else:
+            effective_seed = seed_override * 1000 + fold_id * 100 + nn_idx
+        torch.manual_seed(effective_seed)
+        np.random.seed(effective_seed)
 
         if live_plot is not None:
             live_plot.start_model(nn_idx)
