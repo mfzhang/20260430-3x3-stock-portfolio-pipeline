@@ -84,7 +84,7 @@ TRAINING_SNAPSHOT_INTERVAL = 10        # snapshot interval (trading days)
 # Optuna Stage 1 Trial #58 best (v2.3.7 production)
 # 60-trial TPE search; best rank_corr 0.5616 (4-fold layout, N=5 ensemble)
 TRAINING_NN_ARCHITECTURE = [64, 32, 16]  # 'medium' (Optuna best)
-TRAINING_EPOCHS = 5000
+TRAINING_EPOCHS = 20000   # [v2.3.15 Amendment 2] 5000 → 20000 (Prechelt 2.0× safety margin under NLL convergence)
 TRAINING_LR = 0.00024955280836145015           # ~2.5e-4
 TRAINING_WEIGHT_DECAY = 0.00016413025522015487  # ~1.64e-4
 TRAINING_HUBER_DELTA = 0.5

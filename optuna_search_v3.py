@@ -61,7 +61,7 @@ N_FOLDS_TOTAL = 5
 STAGE1_FOLD_INDICES = [0, 1, 2, 3, 4]
 EXCLUDED_TICKERS = {'SNDK'}
 
-TRIAL_TIMEOUT_SEC = 120 * 60
+TRIAL_TIMEOUT_SEC = 900 * 60   # [v2.3.15 Amendment 2] 120 → 900 min (15h) — accommodates large arch + cap 20000
 CACHE_PATH = "results/backtest_cache.npz"
 OUTPUT_DIR = "results/stage1_v2315"
 RESULTS_PATH = os.path.join(OUTPUT_DIR, "best_trials.json")

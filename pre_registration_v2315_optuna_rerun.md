@@ -479,3 +479,170 @@ P1 will be a separate commit before the `optuna_search_v3.py` commit, following 
 - `7889623` (v2.3.8): Defect A fix, `TRAINING_WEIGHT_DECAY` made config-driven across all production paths — eliminates Adam monkey-patch requirement in v3
 
 **End of Amendment 1.**
+---
+
+## Amendment 2 — Epoch budget increase for NLL convergence regime
+
+**Date**: 2026-05-20 (during v2.3.15 smoke + diagnostic phase)
+
+**Status**: Applied before full Optuna Stage 1 launch.
+
+### Discovery
+
+The original pre-registration §3 specified `TRAINING_EPOCHS = 5000` based on
+v2.3.6 §54 precedent. That precedent was established under **Huber loss** at
+the v2.3.6 epoch budget diagnostic (6000-epoch trajectory, single architecture
+[64, 32, 16], <0.1% block improvement criterion → 5000 chosen).
+
+The v2.3.15 smoke test (Trial 0, small arch [32, 16], heteroscedastic NLL on
+log-vol) revealed that **17 of 25 NN trainings (68%) reached the 5000-epoch
+cap before patience-based early stopping could fire**. Best val_NLL was
+observed at epochs 4988-5000 across multiple ensemble members and folds,
+indicating models were still improving when the budget exhausted.
+
+This violates Henderson et al. (2018, "Deep Reinforcement Learning that
+Matters") and Gundersen & Kjensmo (2018, AAAI) requirements that all
+configurations receive equivalent training opportunity for fair hyperparameter
+comparison. NLL loss surface converges more slowly than Huber (empirically
+confirmed in diagnostic below); the 5000-epoch budget calibrated under Huber
+is insufficient under NLL.
+
+### Diagnostic methodology
+
+Following v2.3.6 §54 precedent exactly, a 10,000-epoch val_NLL trajectory was
+recorded for three architectures (small [32, 16], medium [64, 32, 16],
+large [128, 64, 32]) on Fold 2 of the v2.3.15 training data (SNDK excluded).
+Hyperparameters matched Trial 0 smoke exactly for direct comparability:
+lr=0.00035747, weight_decay=0.000797, dropout=0.360, var_thr=0.00205,
+corr_thr=0.00131. Single NN per architecture (no ensemble), seed 42,
+patience-based early stop disabled to force full 10,000-epoch trajectory.
+
+Script: `diag_val_trajectory_v2315.py` (one-off diagnostic, not committed
+to git per v2.3.6 §58.5).
+
+### Diagnostic findings (block analysis, <0.1% block improvement criterion)
+
+| Architecture | First <0.1% block | Best val_NLL | Best epoch | Plateau character |
+|---|---|---|---|---|
+| small [32, 16] | 9500 → 10000 (0.07%) | -2.292 | 9835 | single isolated cross |
+| medium [64, 32, 16] | 9000 → 9500 (0.07%) | -2.318 | 9922 | borderline plateau |
+| large [128, 64, 32] | 7500 → 8000 (0.07%) | -2.439 | 9635 | clean plateau (5 consecutive blocks <0.1%) |
+
+Critical observation: small and medium architectures **never reach a
+"consistently below" plateau** in the Bishop (1995) / Goodfellow et al.
+(2016) sense (defined as multiple consecutive sub-threshold blocks). Only
+the large architecture shows a robust plateau. Single-block threshold
+crossings observed in small (9500) and medium (9000) reflect noisy
+fluctuation in the asymptotic convergence regime, not true plateau onset.
+
+**Max best epoch across all architectures: 9922** (medium arch).
+
+All three architectures continue showing infinitesimal improvement at
+epoch 10000. This is consistent with NN convergence theory (Robbins-Monro
+1951, Bottou et al. 2018): asymptotic convergence rate is O(1/epoch) or
+O(1/√epoch), meaning a true mathematical plateau is never reached. The
+diagnostic correctly identifies "effective convergence" but cannot identify
+"final convergence" because none exists.
+
+### Decision rule (revised cap)
+
+Per Prechelt (1998, "Early Stopping — But When?") and Goodfellow et al.
+(2016, Deep Learning §8.7), the cap should be set such that **patience-based
+early stopping is the effective stop mechanism**, with cap serving as a
+safety net. Standard practice is **1.5× to 2.0× safety margin over the
+observed best epoch**.
+
+**Selected: 2.0× margin (strictest end of Prechelt range)**
+
+Rationale:
+- Asymmetric Validation Principle §1 (default to most rigorous): 2.0×
+  margin is the academic maximum within Prechelt range.
+- Diagnostic shows architectures still improving at 10,000; even 2.0×
+  margin (≈20,000) is not "over-provisioned" — it ensures patience-fire
+  has room to operate.
+- Eliminates architecture-dependent cap-binding bias (a key concern under
+  the original 5000-cap, where large arch with higher capacity hits cap
+  sooner).
+
+**New cap**: max(best_epoch) × 2.0 = 9922 × 2.0 ≈ **20,000 epochs**
+
+### Trial timeout adjustment (required pairing)
+
+Cap increase alone is insufficient. Per Gundersen & Kjensmo (2018), trial
+timeout must also accommodate the new budget to prevent
+architecture-dependent timeout pruning. Without this, large architectures
+(slower per epoch) would be systematically timeout-pruned, biasing
+hyperparameter selection toward smaller architectures.
+
+Estimated wall-clock per trial at new cap:
+- small arch (25 NN per trial × 5 folds × 5 ensemble): ~3.5h (under timeout)
+- medium arch: ~6.5h (under timeout)
+- large arch: ~11.2h (would exceed 4h or 7h timeout)
+- 15h (900min) timeout: all architectures complete normally via patience-fire
+
+**New trial timeout**: 120min → **900min (15h)**
+
+### Code changes
+
+| File | Constant | Before | After |
+|---|---|---|---|
+| `config.py` | `TRAINING_EPOCHS` | 5000 | **20000** |
+| `optuna_search_v3.py` | `TRIAL_TIMEOUT_SEC` | `120 * 60` | **`900 * 60`** |
+| `backtest.py` | (epoch loop) | reads `config.TRAINING_EPOCHS` | unchanged |
+| `config.py` | `EARLY_STOP_PATIENCE` | 41 | 41 (unchanged) |
+
+### Wall-clock budget revision
+
+| Phase | Original estimate | Revised estimate |
+|---|---|---|
+| Single trial (avg) | ~30-40 min | ~5-7h |
+| Full 60-trial study | ~45-55h | **~16-18 days** |
+
+### Pre-commitment verification
+
+This amendment was finalized **before** any full Optuna study trials
+contributed to hyperparameter selection. Specifically:
+- Smoke Trial 0 results identified the 68% cap-bounded pattern (not used
+  for hyperparameter selection or interpretation of T*).
+- 10,000-epoch diagnostic was a methodology-only investigation (single NN
+  per arch, no ensemble, no Optuna study contamination).
+- Full Stage 1 study (60 trials) launches with new cap/timeout applied
+  from Trial 0.
+
+Per Asymmetric Validation Principle §2 ("amendments when discoveries
+during the study force methodological updates"), this amendment is
+justified by observed evidence (68% cap-bounded under original budget)
+and conforms to NN early-stopping literature standards (Prechelt 1998,
+Goodfellow 2016, Henderson 2018).
+
+### Bibliography for Amendment 2
+
+- **Prechelt, L. (1998)**. "Early Stopping — But When?" In *Neural Networks:
+  Tricks of the Trade*. Springer. Recommends 1.5× to 2.0× safety margin
+  for cap selection.
+- **Bishop, C. M. (1995)**. *Neural Networks for Pattern Recognition*.
+  Defines plateau as consistently-below-threshold for multiple consecutive
+  intervals.
+- **Goodfellow, I., Bengio, Y., & Courville, A. (2016)**. *Deep Learning*,
+  §8.7. "Patience parameter should be set conservatively because training
+  curves can exhibit non-monotonic behavior."
+- **Henderson, P., et al. (2018)**. "Deep Reinforcement Learning that
+  Matters." AAAI. Cap-bounded ratio should be low for fair comparison.
+- **Gundersen, O. E. & Kjensmo, S. (2018)**. "State of the Art:
+  Reproducibility in AI." AAAI. Fair hyperparameter comparison requires
+  equivalent training budget and opportunity to converge.
+- **Robbins, H. & Monro, S. (1951)**. "A Stochastic Approximation Method."
+  Foundation of asymptotic NN convergence rates.
+- **Bottou, L., Curtis, F. E., & Nocedal, J. (2018)**. "Optimization
+  methods for large-scale machine learning." SIAM Review. O(1/epoch) and
+  O(1/√epoch) convergence rates for stochastic gradient methods.
+
+### Cap-bounded ratio target (post-launch verification)
+
+Per Henderson 2018 implicit standard ("verify cap doesn't bias selection"),
+the post-Stage-1 analysis will report cap-bounded ratio across all 1500
+NN trainings (60 trials × 5 folds × 5 NN). Target: **<5%** (vs 68%
+observed under original 5000-cap). If cap-bounded ratio exceeds 10% at
+20,000 cap, methodology will be flagged for further amendment in v2.3.16
+(though this is unlikely given diagnostic showing best epochs cluster
+around 9600-9900).
