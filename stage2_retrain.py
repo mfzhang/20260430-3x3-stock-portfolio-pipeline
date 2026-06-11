@@ -766,6 +766,9 @@ def main():
     parser.add_argument('--include-sndk', action='store_true')
     parser.add_argument('--beta-nll', action='store_true',
                         help='Use beta-NLL loss (Seitzer et al. 2022) for v2.3.13 comparison study')
+    parser.add_argument('--seed', type=int, default=None,
+                        help='Seed override for paired multi-seed runs (v2.3.16). '
+                             'None = production formula. Data split stays fixed regardless.')
     args = parser.parse_args()
 
     np.random.seed(SEED)
@@ -798,6 +801,8 @@ def main():
     chosen = optuna_results['top_3_configs'][rank_idx]
     params = chosen['params']
     config_label = f"top{args.config_rank}_trial{chosen['trial_number']}"
+    if args.seed is not None:
+        config_label += f"_seed{args.seed}"
 
     print("=" * 70)
     print(f"STAGE 2 RETRAIN — {config_label}")
@@ -820,7 +825,7 @@ def main():
     # v2.3.15 NLL search space tunes dropout instead of huber_delta
     config_overrides = {
         'TRAINING_LR': params['lr'],
-        'TRAINING_DROPOUT': params['dropout'],
+        'TRAINING_DROPOUT': params.get('dropout', 0.2),
         'TRAINING_NN_ARCHITECTURE': params['architecture'],
         'VAR_THRESHOLD': params['var_threshold'],
         'CORR_THRESHOLD': params['corr_threshold'],
@@ -868,6 +873,7 @@ def main():
                 n_ensemble=N_ENSEMBLE_STAGE2,
                 n_select=N_SELECT,
                 config_label=config_label,
+                seed_override=args.seed,
             )
             fold_results.append(result)
             elapsed = (time.time() - t_fold) / 60
