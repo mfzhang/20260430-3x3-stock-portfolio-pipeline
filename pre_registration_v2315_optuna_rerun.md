@@ -646,3 +646,105 @@ observed under original 5000-cap). If cap-bounded ratio exceeds 10% at
 20,000 cap, methodology will be flagged for further amendment in v2.3.16
 (though this is unlikely given diagnostic showing best epochs cluster
 around 9600-9900).
+
+---
+
+## Amendment 3 — Stage 1 result: mechanical verdict application (Diverged)
+
+**Date**: 2026-06-11 (post Stage 1 completion, pre v2.3.16 Stage 2 design)
+
+**Status**: Records the outcome of applying the §5 acceptance rule. Unlike
+Amendments 1-2, this amendment changes no rules; it documents the
+pre-registered verdict and triggers the pre-committed downstream path.
+
+### Stage 1 completion facts
+
+- Launched 2026-05-30 20:02 KST, finished 2026-06-05 10:57 KST (~135h
+  wall-clock, avg ~135 min/trial)
+- 60/60 trials COMPLETE; 0 FAIL, 0 PRUNED
+- Study: `stage1_5fold_NLL_6dims_no_sndk`, storage
+  `optuna_storage_v2315.db`, seed 42, N_ENSEMBLE=5
+- Artifacts: `results/stage1_v2315/best_trials.json` (committed),
+  `optuna_storage_v2315.db` + `optuna_stage1_desktop.log` (archived
+  off-git per .gitignore policy; transferred desktop -> Mac via Drive)
+
+### Mechanical verdict (T* = Trial 52, rank_corr 0.57318)
+
+Applying §5 per-dimension rules against Trial #58 reference:
+
+| Dimension | T* value | Reference | Computed | Threshold | Verdict |
+|---|---|---|---|---|---|
+| lr | 1.5636e-3 | 2.5e-4 | \|log10\| = 0.796 | > 0.3 | DIVERGED |
+| weight_decay | 4.4856e-5 | 1.64e-4 | \|log10\| = 0.563 | > 0.3 | DIVERGED |
+| architecture | large | medium | categorical mismatch | != medium | DIVERGED |
+| var_threshold | 1.0819e-3 | 1.97e-3 | \|log10\| = 0.260 | > 0.3 | robust |
+| corr_threshold | 5.5843e-2 | 8.38e-2 | \|log10\| = 0.176 | > 0.3 | robust |
+| dropout | 0.1146 | 0.2 | \|diff\| = 0.085 | > 0.1 | robust |
+
+3 of 6 dimensions diverged. Per the §5 disjunctive rule, the verdict is
+**Diverged**. H0 confirmed: v2.3.6 Optuna hyperparameters (Huber-loss MLP
+search) do not transfer to the heteroscedastic NLL architecture. The
+full re-run (Path Y) was necessary.
+
+### Pre-registered consequences (now in force)
+
+1. v2.3.16 Stage 2 retrain proceeds using Trial 52 hyperparameters.
+2. v2.3.12 production is superseded.
+3. v2.3.7-v2.3.14 results carry a "trained under superseded
+   hyperparameters" annotation in subsequent documentation.
+
+### Top-3 trials
+
+All three are `large` [128, 64, 32], all late-run (TPE convergence):
+
+| Rank | Trial | rank_corr | lr | weight_decay | var_thr | corr_thr | dropout |
+|---|---|---|---|---|---|---|---|
+| 1 | 52 | 0.57318 | 1.5636e-3 | 4.4856e-5 | 1.0819e-3 | 5.5843e-2 | 0.1146 |
+| 2 | 51 | 0.57072 | 1.1260e-3 | 5.0782e-5 | 1.0189e-3 | 5.3295e-2 | 0.1015 |
+| 3 | 42 | 0.56918 | 1.7080e-3 | 3.0675e-5 | 4.9740e-3 | 4.7184e-2 | 0.1140 |
+
+Per-fold rank_corr shows a consistent shape across all three (Folds 1, 3
+weak at ~0.44-0.47; Folds 2, 4, 5 strong at ~0.63-0.67), indicating
+fold-intrinsic difficulty rather than config-specific behavior.
+
+### Secondary consistency check (§7 ex ante)
+
+33/60 trials exceeded rank_corr 0.55; 56/60 exceeded 0.50. The optimum
+sits on a broad plateau, not a narrow peak — low overfit-to-search risk.
+
+### Cap-bounded ratio (Amendment 2 post-launch verification)
+
+0 of 1500 NN trainings stopped at the 20,000-epoch cap (0%). Amendment 2
+target (<5%) is met; no further epoch-budget amendment is required.
+
+### Observation: plateau selection stability
+
+Trials 42/51/52 produced **identical per-fold Top-5 sets** in all 5 folds
+(ordering differs in Folds 3-5; sets are equal). Since selection alpha
+depends only on the picked set, fold_alphas are byte-identical across the
+three trials ([0.0637, 0.0785, 0.0511, 0.0911, 0.1188], mean +8.06%p).
+This was initially flagged as an anomaly and verified via DB user_attrs
+and log parsing. Notably, Trial 42's var_threshold differs ~5x from
+Trials 51/52 (different feature sets), yet selections converge —
+plateau configs agree at the selection level while differing in full
+ranking (hence distinct rank_corr values). Alpha figures are Stage 1
+N=5 values; production-comparable numbers come from the v2.3.16 N=20
+retrain.
+
+### Limitations
+
+- **Search-space boundary clustering**: top-3 dropout values (0.1015-0.1146)
+  cluster at the lower bound of [0.1, 0.4]; top-2 var_threshold values
+  (~1.02-1.08e-3) sit at the lower bound of [1e-3, 1e-1]. The true optima
+  may lie outside the searched ranges. Widening is deferred to a future
+  study; v2.3.16 proceeds with Trial 52 as-is per §10.
+- **Cross-ensemble-size caveat**: Stage 1 best (0.5732, N=5) vs v2.3.12
+  production (0.5021, N=20) is not a like-for-like comparison. The honest
+  comparison number comes from the v2.3.16 N=20 retrain.
+
+### Why this does not undermine the original pre-registration
+
+No rule is changed. The §5 rule was applied exactly as written, the §10
+unconditional retrain commitment proceeds, and both possible verdicts had
+pre-committed paths. This amendment exists to satisfy §11's requirement
+that the verdict record itself be a dated, committed amendment.
