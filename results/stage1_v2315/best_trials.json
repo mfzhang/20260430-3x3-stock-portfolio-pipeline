@@ -1,0 +1,125 @@
+{
+  "study_name": "stage1_5fold_NLL_6dims_no_sndk",
+  "version": "v2.3.15",
+  "loss_function": "heteroscedastic_gaussian_nll",
+  "n_trials_total": 60,
+  "n_trials_completed": 60,
+  "n_trials_target": 60,
+  "best_mean_rank_corr": 0.57318,
+  "top_3_configs": [
+    {
+      "rank": 1,
+      "trial_number": 52,
+      "mean_rank_corr": 0.57318,
+      "mean_alpha": 0.08064,
+      "fold_rank_corrs": [
+        0.4491,
+        0.6363,
+        0.4704,
+        0.6509,
+        0.6592
+      ],
+      "fold_alphas": [
+        0.0637,
+        0.0785,
+        0.0511,
+        0.0911,
+        0.1188
+      ],
+      "elapsed_sec": 5565.559841871262,
+      "params": {
+        "lr": 0.001563563963064687,
+        "weight_decay": 4.4856093488331435e-05,
+        "architecture": "large",
+        "var_threshold": 0.0010819081885486052,
+        "corr_threshold": 0.05584259829572068,
+        "dropout": 0.1146035891599349
+      }
+    },
+    {
+      "rank": 2,
+      "trial_number": 51,
+      "mean_rank_corr": 0.57072,
+      "mean_alpha": 0.08064,
+      "fold_rank_corrs": [
+        0.4529,
+        0.645,
+        0.4521,
+        0.643,
+        0.6606
+      ],
+      "fold_alphas": [
+        0.0637,
+        0.0785,
+        0.0511,
+        0.0911,
+        0.1188
+      ],
+      "elapsed_sec": 6040.856041431427,
+      "params": {
+        "lr": 0.0011259991345845394,
+        "weight_decay": 5.078217939208741e-05,
+        "architecture": "large",
+        "var_threshold": 0.001018916194339174,
+        "corr_threshold": 0.05329496373526212,
+        "dropout": 0.10154743277404077
+      }
+    },
+    {
+      "rank": 3,
+      "trial_number": 42,
+      "mean_rank_corr": 0.56918,
+      "mean_alpha": 0.08064,
+      "fold_rank_corrs": [
+        0.4458,
+        0.656,
+        0.4366,
+        0.6346,
+        0.6729
+      ],
+      "fold_alphas": [
+        0.0637,
+        0.0785,
+        0.0511,
+        0.0911,
+        0.1188
+      ],
+      "elapsed_sec": 4902.2057056427,
+      "params": {
+        "lr": 0.0017079613944316673,
+        "weight_decay": 3.067546579783669e-05,
+        "architecture": "large",
+        "var_threshold": 0.004973972146413779,
+        "corr_threshold": 0.047183502764435954,
+        "dropout": 0.11400086098275669
+      }
+    }
+  ],
+  "stage1_settings": {
+    "n_ensemble": 5,
+    "fold_indices": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "excluded_tickers": [
+      "SNDK"
+    ],
+    "timeout_sec": 54000,
+    "sampler_seed": 42,
+    "search_space": {
+      "lr": "loguniform [1e-4, 3e-3]",
+      "weight_decay": "loguniform [1e-5, 1e-3]",
+      "architecture": [
+        "small",
+        "medium",
+        "large"
+      ],
+      "var_threshold": "loguniform [1e-3, 1e-1]",
+      "corr_threshold": "loguniform [1e-3, 1e-1]",
+      "dropout": "uniform [0.1, 0.4]"
+    }
+  }
+}
