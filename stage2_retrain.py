@@ -43,7 +43,7 @@ N_ENSEMBLE_STAGE2 = 20
 FOLDS_STAGE2 = [0, 1, 2, 3, 4]
 EXCLUDED_TICKERS = {'SNDK'}
 N_SELECT = 5
-RESULTS_DIR = Path('results/stage2')
+RESULTS_DIR = Path('results/stage2_v2316')
 
 # Loss function dispatcher (overridden in main if --beta-nll passed)
 LOSS_FN = heteroscedastic_loss
@@ -388,6 +388,7 @@ def run_fold_with_plot(data, train_tickers, test_tickers, fold_id,
     weight_decay = getattr(config_module, 'TRAINING_WEIGHT_DECAY', 1e-4)
     epochs = getattr(config_module, 'TRAINING_EPOCHS', 5000)
     patience = getattr(config_module, 'EARLY_STOP_PATIENCE', 41)
+    dropout = getattr(config_module, 'TRAINING_DROPOUT', 0.2)
     batch_size = 256
 
     # Ensemble: collect 4-tuple predictions per model (risk in log-space)
@@ -410,7 +411,7 @@ def run_fold_with_plot(data, train_tickers, test_tickers, fold_id,
         if live_plot is not None:
             live_plot.start_model(nn_idx)
 
-        model = HeteroscedasticDualHeadNN(in_dim=n_features, hidden_dims=arch, dropout=0.2)
+        model = HeteroscedasticDualHeadNN(in_dim=n_features, hidden_dims=arch, dropout=dropout)
 
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -761,7 +762,7 @@ def main():
     parser.add_argument('--config-rank', type=int, default=1, choices=[1, 2, 3])
     parser.add_argument('--no-plot', action='store_true')
     parser.add_argument('--results-json',
-                        default='results/optuna_stage1_results.json')
+                        default='results/stage1_v2315/best_trials.json')
     parser.add_argument('--include-sndk', action='store_true')
     parser.add_argument('--beta-nll', action='store_true',
                         help='Use beta-NLL loss (Seitzer et al. 2022) for v2.3.13 comparison study')
@@ -773,8 +774,8 @@ def main():
     global EXCLUDED_TICKERS, RESULTS_DIR, LOSS_FN, LOSS_LABEL
     if args.include_sndk:
         EXCLUDED_TICKERS = set()
-        RESULTS_DIR = Path('results/stage2_with_sndk')
-        print("[Sensitivity mode] SNDK included; output -> results/stage2_with_sndk/")
+        RESULTS_DIR = Path('results/stage2_v2316_with_sndk')
+        print("[Sensitivity mode] SNDK included; output -> results/stage2_v2316_with_sndk/")
 
     if args.beta_nll:
         LOSS_FN = heteroscedastic_loss_beta
@@ -801,7 +802,7 @@ def main():
     print("=" * 70)
     print(f"STAGE 2 RETRAIN — {config_label}")
     print("=" * 70)
-    print(f"Optuna Stage 1 mean rank_corr (N=5, 4-fold): {chosen['mean_rank_corr']:+.4f}")
+    print(f"Optuna Stage 1 mean rank_corr (N=5, 5-fold): {chosen['mean_rank_corr']:+.4f}")
     print(f"Hyperparameters:")
     for k, v in params.items():
         print(f"  {k:18s} = {v}")
@@ -816,9 +817,10 @@ def main():
 
     import config as config_module
 
+    # v2.3.15 NLL search space tunes dropout instead of huber_delta
     config_overrides = {
         'TRAINING_LR': params['lr'],
-        'TRAINING_HUBER_DELTA': params['huber_delta'],
+        'TRAINING_DROPOUT': params['dropout'],
         'TRAINING_NN_ARCHITECTURE': params['architecture'],
         'VAR_THRESHOLD': params['var_threshold'],
         'CORR_THRESHOLD': params['corr_threshold'],
@@ -895,13 +897,12 @@ def main():
         print(f"Mean selection alpha:             "
               f"{agg['selection_alpha_mean']*100:+.1f}%p  "
               f"± {agg['selection_alpha_std']*100:.1f}%p")
+        v2312_baseline = 0.5021  # N=20, 5-fold, no SNDK, NLL (v2.3.12 production)
         print(f"\nComparison points:")
-        print(f"  Optuna Stage 1 (N=5, 4-fold):  "
-              f"{chosen['mean_rank_corr']:+.4f}")
-        print(f"  v2.3.4 baseline (N=20, 5-fold): +0.5311 (with SNDK, Huber)")
-        print(f"  v2.3.8 baseline (N=20, 5-fold): +0.5181 (no SNDK, Huber)")
-        print(f"  Stage 2 NLL (N=20, 5-fold):     "
-              f"{agg['rank_corr_mean']:+.4f} (no SNDK, Gaussian NLL log-vol)")
+        print(f"  Optuna Stage 1 (N=5, 5-fold):      {chosen['mean_rank_corr']:+.4f}  (search scale)")
+        print(f"  v2.3.12 baseline (N=20, 5-fold):   {v2312_baseline:+.4f}  (no SNDK, NLL)")
+        print(f"  This run (N=20, 5-fold):           {agg['rank_corr_mean']:+.4f}  (no SNDK, NLL)")
+        print(f"  Delta vs v2.3.12 baseline:         {agg['rank_corr_mean'] - v2312_baseline:+.4f}")
         print(f"\nTotal elapsed: {total_elapsed/60:.1f} min "
               f"({total_elapsed/3600:.1f} h)")
 
